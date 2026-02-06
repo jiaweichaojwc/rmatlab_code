@@ -2,31 +2,63 @@ classdef GeoUtils
     methods (Static)
         %% ================= 1. 区域配置与路径获取 =================
         function [data_dir, roi_file, belt_lon, belt_lat] = getRegionConfig(region_type)
-            % 根据 region_type 返回数据路径和 ROI 文件名
-            % 注意：请根据你的实际路径修改这里
+            %% 1. 【新增】手动交互模式 (当 region_type 为空时触发)
+            if isempty(region_type)
+                fprintf('>>> [交互模式] 检测到 region_type 为空，请手动选择路径...\n');
+                
+                % (1) 选择 data 文件夹
+                fprintf('    正在等待选择 data 文件夹...\n');
+                sel_path = uigetdir(pwd, '请选择 data 数据文件夹');
+                if sel_path == 0
+                    error('用户取消了文件夹选择，程序终止。');
+                end
+                data_dir = sel_path;
+                fprintf('    已选择数据路径：%s\n', data_dir);
+                
+                % (2) 选择 ROI 坐标文件 (默认在 data 的上一级找)
+                root_dir = fileparts(data_dir);
+                fprintf('    正在等待选择坐标文件 (Excel)...\n');
+                [f_name, f_path] = uigetfile({'*.xlsx';'*.xls'}, '请选择经纬度坐标文件', root_dir);
+                if f_name == 0
+                    error('用户取消了坐标文件选择，程序终止。');
+                end
+                roi_file = f_name; % 这里只存文件名，后续程序会自动拼路径
+                fprintf('    已选择坐标文件：%s\n', roi_file);
+                
+                % (3) 自动计算 belt 范围
+                % 注意：这里假设你选的 ROI 文件确实在 root_dir 下。
+                % 如果你是在别的路径选的文件，我们需要确保 get_belt_coords 能找到它。
+                % 为了稳健，我们这里临时把 roi_file 改为全路径传递给 get_belt_coords 也可以，
+                % 但为了兼容旧接口，我们假设文件就在 root_dir (data父目录) 下。
+                if ~strcmpi(f_path(1:end-1), root_dir)
+                     % 如果用户选的文件不在 data 的父目录，可能需要特殊处理
+                     % 这里简单处理：让后续程序能通过 root_dir + roi_file 找到即可
+                     % 或者修改 get_belt_coords 支持全路径。
+                     % 简单起见，建议用户把 Excel 放在 data 同级或父级。
+                     fprintf('    ⚠️ 注意：坐标文件路径与 data 父目录不一致，正在适配...\n');
+                end
+                
+                [belt_lon, belt_lat] = GeoUtils.get_belt_coords(f_path, roi_file);
+                return;
+            end
+
+            %% 2. 自动配置模式 (原有逻辑)
             switch region_type
                 case 'shanxi'
-                    % 示例路径，请修改为你电脑上的实际路径
-                    % 假设你的项目结构是 Project/data/...
-                    % 这里为了演示，指向一个假设路径，请确保改为 Main.m 中能找到的路径
-                    % 如果你在 Main.m 中使用的是相对路径，这里需要保持一致
-                    
                     % ⚠️ 请将此处修改为你真实的 data 文件夹路径 ⚠️
                     data_dir = 'C:\Users\Deep-Lei\Desktop\下载任务结果\新疆高昌区库格孜觉北金矿（四川黄金）59.05km2（20260104任务，20260105下载）\data';
                     roi_file = '经纬度坐标.xlsx';
                     
-                % ... 你可以在这里添加其他 case ...
+                    % 自动计算 belt (原有逻辑)
+                    root_dir = fileparts(data_dir);
+                    [belt_lon, belt_lat] = GeoUtils.get_belt_coords(root_dir, roi_file);
+
+                % ... 这里保留你其他的 case ...
+                
                 otherwise
                     error('GeoUtils:UnknownRegion', '未知的区域类型: %s', region_type);
             end
-            
-            % 获取 root_dir (data 的上一级)
-            root_dir = fileparts(data_dir);
-            
-            % 调用本类中的静态方法获取 belt 坐标
-            [belt_lon, belt_lat] = GeoUtils.get_belt_coords(root_dir, roi_file);
         end
-
         function [belt_lon, belt_lat] = get_belt_coords(root_dir, roi_file)
             % 读取 ROI Excel 文件并生成边界矩形
             fullpath_roi = fullfile(root_dir, roi_file);
@@ -284,7 +316,7 @@ classdef GeoUtils
         
             REP_QA(valid_pixel & ~rep_out_range) = 1;
         end
-        
+
         function F_abs = computeIntrinsicAbsorption(ast, mineral_type)
             % computeIntrinsicAbsorption: 计算本征吸收强度
             % 严格对齐 both.m 的 switch-case 逻辑

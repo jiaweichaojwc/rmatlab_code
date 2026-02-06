@@ -5,7 +5,7 @@ addpath(genpath(pwd)); % 确保加载所有类文件
 
 % 1. 配置参数
 config.mineral_type = 'gold'; 
-config.region_type  = 'shanxi';
+config.region_type  = '';
 config.levashov_mode = true;
 config.outDir       = ['Result_', config.mineral_type, '_', datestr(now, 'yyyymmdd')];
 if ~exist(config.outDir, 'dir'), mkdir(config.outDir); end
