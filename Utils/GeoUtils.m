@@ -42,6 +42,22 @@ classdef GeoUtils
                 return;
             end
 
+            function outDir = createOutputFolder(data_dir, mineral_type)
+            % 1. 拼接文件夹名称：Result_矿种_日期
+            folder_name = ['Result_', mineral_type, '_', datestr(now, 'yyyymmdd')];
+            
+            % 2. 拼接绝对路径：在 data_dir 里面创建
+            outDir = fullfile(data_dir, folder_name);
+            
+            % 3. 执行创建
+            if ~exist(outDir, 'dir')
+                mkdir(outDir);
+                fprintf('✅ 已在数据目录下创建结果文件夹：%s\n', outDir);
+            else
+                fprintf('⚠️ 结果文件夹已存在：%s\n', outDir);
+            end
+            end
+
             %% 2. 自动配置模式 (原有逻辑)
             switch region_type
                 case 'shanxi'
