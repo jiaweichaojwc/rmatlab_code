@@ -3,6 +3,7 @@ classdef GeoDataContext < handle
         % 原始配置
         mineral_type
         region_type
+        levashov_mode = true
         
         % 基础数据 (H x W x Bands)
         s2      % Sentinel-2 (Reflectance)

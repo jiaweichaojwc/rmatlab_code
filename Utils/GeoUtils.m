@@ -246,53 +246,134 @@ classdef GeoUtils
 
         %% ================= 4. 算法核心函数 =================
         function [S2REP, REP_QA] = calculate_S2REP_from_DN(B4, B5, B6, B7, scale_factors, offsets)
-            % 原逻辑实现
-            B4_val = double(B4)/0.0001 * scale_factors(1) + offsets(1); % 还原并应用校正
-            B5_val = double(B5)/0.0001 * scale_factors(2) + offsets(2);
-            B6_val = double(B6)/0.0001 * scale_factors(3) + offsets(3);
-            B7_val = double(B7)/0.0001 * scale_factors(4) + offsets(4);
+            % 严格复刻 untitled.m 的逻辑：
+            % 输入的 B4-B7 是已经 *0.0001 后的反射率 (0-1)
+            % 原代码逻辑：double(B4_DN*10000) * scale + offset
             
-            % 简化逻辑：直接使用反射率计算（假设输入已经是反射率，上面的DN还原可视情况调整）
-            % 为保持一致性，如果输入已经是反射率，这里直接用：
-            numerator = ((B4 + B7) / 2) - B5;
-            denominator = (B6 - B5) + 1e-8;
-            S2REP = 705 + 35 * (numerator ./ denominator);
+            % 1. 还原为 DN 值并应用特定定标参数
+            B4_val = double(B4 * 10000) * scale_factors(1) + offsets(1);
+            B5_val = double(B5 * 10000) * scale_factors(2) + offsets(2);
+            B6_val = double(B6 * 10000) * scale_factors(3) + offsets(3);
+            B7_val = double(B7 * 10000) * scale_factors(4) + offsets(4);
             
-            % 简单QA
-            REP_QA = ones(size(S2REP));
-            REP_QA(S2REP < 680 | S2REP > 760) = 4;
+            % 2. 标记无效像素
+            invalid_reflect = (B4_val < 0 | B4_val > 1) | (B5_val < 0 | B5_val > 1) ...
+                            | (B6_val < 0 | B6_val > 1) | (B7_val < 0 | B7_val > 1) ...
+                            | isnan(B4_val) | isnan(B5_val) | isnan(B6_val) | isnan(B7_val);
+            
+            [H, W] = size(B4);
+            S2REP = nan(H, W);
+            REP_QA = zeros(H, W);
+            REP_QA(invalid_reflect) = 3;
+            valid_pixel = ~invalid_reflect;
+        
+            % 3. 计算 S2REP 公式
+            numerator = ((B4_val + B7_val) / 2) - B5_val;
+            denominator = (B6_val - B5_val) + 1e-8;
+        
+            zero_denominator = valid_pixel & (abs(denominator) < 1e-6);
+            REP_QA(zero_denominator) = 2;
+            valid_pixel(zero_denominator) = false;
+        
+            S2REP(valid_pixel) = 705 + 35 * (numerator(valid_pixel) ./ denominator(valid_pixel));
+        
+            % 4. 范围过滤
+            rep_out_range = valid_pixel & (S2REP < 680 | S2REP > 760);
+            REP_QA(rep_out_range) = 4;
+            S2REP(rep_out_range) = NaN;
+        
+            REP_QA(valid_pixel & ~rep_out_range) = 1;
         end
-
+        
         function F_abs = computeIntrinsicAbsorption(ast, mineral_type)
-            % 基于矿物类型的本征吸收计算
+            % computeIntrinsicAbsorption: 计算本征吸收强度
+            % 严格对齐 both.m 的 switch-case 逻辑
+            
             eps_val = 1e-6;
             [H, W, ~] = size(ast);
             F_abs = nan(H, W, 'single');
             
-            % 提取常用波段索引以便阅读
-            % ast 是 14个波段
+            % 提取波段简化引用 (AST有14个波段)
+            % 注意：输入 ast 已经是定标后的 Radiance/Temperature
             b1=ast(:,:,1); b2=ast(:,:,2); b3=ast(:,:,3); b4=ast(:,:,4);
             b5=ast(:,:,5); b6=ast(:,:,6); b7=ast(:,:,7); b8=ast(:,:,8);
             
             switch lower(mineral_type)
-                case 'gold'
+                case 'gold' % 黄铁矿 + Al-OH
                     cont = (b3 + b5)/2; target = b3;
                     F_abs = (cont - target) ./ (cont + eps_val);
                     F_abs = F_abs + 0.5 * (b6 ./ (b5 + eps_val));
-                case 'copper'
+                    
+                case 'copper' % Cu2+ + OH
                     cont = (b3 + b5)/2; target = b3;
                     F_abs = (cont - target) ./ (cont + eps_val);
                     F_abs = F_abs + 0.5 * (b6 ./ (b5 + eps_val));
+                    
                 case 'iron'
                     cont = (b2 + b4)/2; target = b3;
                     F_abs = (cont - target) ./ (cont + eps_val);
+                    
+                case 'coal'
+                    cont = (b5 + b8)/2; target = b7;
+                    F_abs = (cont - target) ./ (cont + eps_val);
+                    
+                case {'oil', 'petroleum', 'offshore_petroleum'}
+                    % 石油/海底石油: (1.6+2.5)/2 - 2.3
+                    cont = (b4 + b8)/2; target = b7;
+                    F_abs = (cont - target) ./ (cont + eps_val);
+                    % 补充 1.7um (B4)
+                    F_abs = F_abs + 0.3 * (b4 ./ (b5 + eps_val)); 
+                    if strcmpi(mineral_type, 'offshore_petroleum')
+                        % 海底石油增强 2.5um
+                        F_abs = F_abs + 0.4 * (b8 ./ (b7 + eps_val));
+                    end
+                    
+                case 'gas'
+                    cont = (b4 + b7)/2; target = b4;
+                    F_abs = (cont - target) ./ (cont + eps_val);
+                    
+                case 'silver'
+                    cont = (b3 + b4)/2; target = b3;
+                    F_abs = (cont - target) ./ (cont + eps_val);
+                    F_abs = F_abs + 0.4 * (b6 ./ (b5 + eps_val));
+                    
+                case 'lead'
+                    cont = (b3 + b4)/2; target = b3;
+                    F_abs = (cont - target) ./ (cont + eps_val);
+                    
+                case 'zinc'
+                    cont = (b3 + b4)/2; target = b3;
+                    F_abs = (cont - target) ./ (cont + eps_val);
+                    F_abs = F_abs + 0.2 * (b6 ./ (b7 + eps_val));
+
+                case 'rare_earth'
+                    cont = (b5 + b7)/2; target = b6;
+                    F_abs = (cont - target) ./ (cont + eps_val);
+                    
+                case 'lithium'
+                    cont = (b6 + b8)/2; target = b7;
+                    F_abs = (cont - target) ./ (cont + eps_val);
+                    F_abs = F_abs + 0.3 * (b6 ./ (b7 + eps_val));
+                    
+                case 'helium'
+                    cont = (b5 + b7)/2; target = b6;
+                    F_abs = (cont - target) ./ (cont + eps_val) * 0.2;
+
+                case 'cave'
+                    % 洞穴模式在 both.m 中返回 NaN，因为它靠 DEM 指数
+                    F_abs = nan(H, W, 'single');
+                    
                 otherwise
-                    % 默认使用 OH 吸收
+                    % 默认通用模式 (OH吸收 2.2um)
                     cont = (b5 + b7)/2; target = b6;
                     F_abs = (cont - target) ./ (cont + eps_val);
             end
+            
+            % 清理异常值 (NaN留给后续处理，Inf置NaN)
             F_abs(isinf(F_abs)) = NaN;
         end
+
+
         
         function moran = computeMoranLocal(Z)
             % 计算 Moran I (无 ROI 限制)

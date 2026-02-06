@@ -6,6 +6,7 @@ addpath(genpath(pwd)); % 确保加载所有类文件
 % 1. 配置参数
 config.mineral_type = 'gold'; 
 config.region_type  = 'shanxi';
+config.levashov_mode = true;
 config.outDir       = ['Result_', config.mineral_type, '_', datestr(now, 'yyyymmdd')];
 if ~exist(config.outDir, 'dir'), mkdir(config.outDir); end
 
@@ -28,10 +29,10 @@ engine.computeAll(dataCtx);
 
 % 6. 灵活融合 (核心需求：你可以随意组合)
 % 方式A: 全融合 (原逻辑)
-final_mask = engine.getFusedMask({'RedEdge', 'Intrinsic', 'SlowVars'});
+final_mask = engine.getFusedMask({'RedEdge', 'Intrinsic'});
 
 % 方式B: 仅看两两结合 (示例)
-% mask_two = engine.getFusedMask({'RedEdge', 'Intrinsic'});
+%mask_two = engine.getFusedMask({'RedEdge', 'Intrinsic'});
 
 % 7. 后续处理 (共振深度、地质约束、可视化)
 %    注：为了保持简洁，后处理逻辑封装在 PostProcessor 中
