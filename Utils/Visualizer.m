@@ -64,8 +64,8 @@ classdef Visualizer
         
             % 自定义 colormap
             n_colors = 256;
-            c1 = [0.7, 0.9, 1.0]; % 浅天蓝
-            c2 = [1.0, 0.0, 0.0]; % 纯红
+            c1 = [1, 1, 1]; % 浅天蓝
+            c2 = [0, 0.8, 0]; % 纯红
             custom_map = [linspace(c1(1),c2(1),n_colors)', linspace(c1(2),c2(2),n_colors)', linspace(c1(3),c2(3),n_colors)'];
         
             for i = 1:4
