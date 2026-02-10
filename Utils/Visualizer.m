@@ -49,19 +49,32 @@ classdef Visualizer
         end
 
         function run_deep_prediction(Au, lonG, latG, lonR, latR, lonT, latT, rIdx, mineral, outDir)
-            f = figure('Position', [500 100 1200 1000], 'Color', 'w', 'Visible', 'off');
+            % 1. 设置 Visible = 'on' 确保渲染
+            f = figure('Position', [500 100 1200 1000], 'Color', 'w', 'Visible', 'on');
+            
             lonV = linspace(min(lonG(:)), max(lonG(:)), size(Au, 2));
             latV = linspace(min(latG(:)), max(latG(:)), size(Au, 1));
             
             [~, hFill] = contourf(lonV, latV, flipud(double(Au)), 80, 'LineColor', 'none');
             hold on; colormap(jet(256)); colorbar; caxis([0.4 1]);
             contour(lonV, latV, flipud(double(Au)), 0.4:0.05:1, 'LineColor', [0.8 0.8 0.8]);
+            
             plot(lonR, latR, 'k-', 'LineWidth', 2.5); 
             if ~isempty(lonT), plot(lonT, latT, 'wo', 'MarkerSize', 10, 'MarkerFaceColor', [0.2 0.2 0.2]); end
             if ~isempty(rIdx), plot(lonT(rIdx), latT(rIdx), 'yo', 'MarkerSize', 18, 'LineWidth', 3); end
             
             axis xy; axis image; grid on; title(['Deep Prediction: ', upper(mineral)], 'FontSize', 16);
-            print(f, fullfile(outDir, '03_深部成矿预测图.png'), '-dpng', '-r500'); close(f);
+            
+            % 2. 强制刷新渲染
+            drawnow; 
+            
+            % 3. 保存 .fig 文件
+            savefig(f, fullfile(outDir, '03_深部成矿预测图.fig'));
+            
+            % 4. 保存 .png 文件
+            print(f, fullfile(outDir, '03_深部成矿预测图.png'), '-dpng', '-r500'); 
+            
+            close(f);
         end
     end
 end
