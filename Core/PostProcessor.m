@@ -1,14 +1,14 @@
 classdef PostProcessor
     methods (Static)
         function run(ctx, engine, final_mask, outDir)
-            fprintf('=== 进入后处理阶段 (严格复刻 untitled2.m 逻辑) ===\n');
+            fprintf('=== 进入后处理阶段 (4掩码增强版) ===\n');
             
-            % 安全获取数据
             function res = safeGet(name)
                 if engine.results.isKey(name)
                     res = engine.getResult(name);
                 else
                     res.mask = zeros(size(ctx.inROI));
+                    res.debug = struct();
                     res.debug.F_map = zeros(size(ctx.inROI));
                     res.debug.delta_red_edge = zeros(size(ctx.inROI));
                     res.debug.moran_local = zeros(size(ctx.inROI));
@@ -18,108 +18,78 @@ classdef PostProcessor
 
             res_Red = safeGet('RedEdge');
             res_Int = safeGet('Intrinsic');
+            res_Slow = safeGet('SlowVars');
+            res_Known = safeGet('KnownAnomaly'); % [新增]
             
+            anomaly_mask_rededge = res_Red.mask; 
+            anomaly_mask_fabs = res_Int.mask;
+            anomaly_mask_slow = res_Slow.mask;
+            anomaly_mask_known = res_Known.mask; % [新增]
+            
+            % Debug data
             F_map = res_Red.debug.F_map;
             delta_red = res_Red.debug.delta_red_edge;
-            anomaly_mask_rededge = res_Red.mask; 
-            
+            moran_local = res_Int.debug.moran_local;
             F_abs = res_Int.debug.F_abs;             
-            anomaly_mask_fabs = res_Int.mask;        
-            moran_local = res_Int.debug.moran_local; 
-            
+
             % 1. 深度与压力
             params = GeoUtils.getYakymchukParams(ctx.mineral_type);
             c = 3e8; epsilon_r = 16;
-            
             f_res_MHz = params.a + params.b * exp(-params.c * abs(F_map));
-            f_res_MHz(isnan(f_res_MHz)) = params.a;
-            f_res_MHz(f_res_MHz < 0) = params.a;
-            f_res_MHz(~ctx.inROI) = NaN;
-            
+            f_res_MHz(isnan(f_res_MHz)) = params.a; f_res_MHz(f_res_MHz < 0) = params.a; f_res_MHz(~ctx.inROI) = NaN;
             depth_map = c ./ (2 * f_res_MHz * 1e6 * sqrt(epsilon_r)) / 1000;
-            depth_map = min(max(depth_map, 0), 4);
-            depth_map(~ctx.inROI) = NaN;
-            
-            grad_P = 25 + 5 * depth_map;
-            grad_P = min(max(grad_P, 0), 40);
-            grad_P(~ctx.inROI) = NaN;
+            depth_map = min(max(depth_map, 0), 4); depth_map(~ctx.inROI) = NaN;
+            grad_P = 25 + 5 * depth_map; grad_P = min(max(grad_P, 0), 40); grad_P(~ctx.inROI) = NaN;
             
             % 2. 地表潜力
             [~,~,~, enh_func] = GeoUtils.getMineralThresholds(ctx.mineral_type);
             eps_val = 1e-6;
-            
-            % 指数计算 + ROI内归一化
             Ferric = GeoUtils.mat2gray_roi(ctx.ast(:,:,2) ./ (ctx.ast(:,:,1) + eps_val), ctx.inROI);
             Clay = GeoUtils.mat2gray_roi(ctx.ast(:,:,6) ./ (ctx.ast(:,:,7) + eps_val), ctx.inROI);
             NDVI_inv = GeoUtils.mat2gray_roi(1 - (ctx.NIR - ctx.Red) ./ (ctx.NIR + ctx.Red + eps_val), ctx.inROI);
             
-            % PCA
-            pcaInput = cat(3, ctx.ast(:,:,4:7));
-            [H, W, ~] = size(pcaInput);
-            pcaInput = reshape(pcaInput, H*W, 4);
-            pcaInput = double(pcaInput - mean(pcaInput, 'omitnan')) ./ std(pcaInput, 'omitnan');
-            
-            % 处理 PCA 输入的 NaN (置0以防报错，虽然 untitled2.m 没显式处理，但这是标准防错)
-            pcaInput(isnan(pcaInput)) = 0;
-            
-            [~, score] = pca(pcaInput);
-            pcaResult = reshape(score, H, W, 4);
-            
+            pcaInput = cat(3, ctx.ast(:,:,4:7)); [H, W, ~] = size(pcaInput); pcaInput = reshape(pcaInput, H*W, 4);
+            pcaInput = double(pcaInput - mean(pcaInput, 'omitnan')) ./ std(pcaInput, 'omitnan'); pcaInput(isnan(pcaInput)) = 0;
+            [~, score] = pca(pcaInput); pcaResult = reshape(score, H, W, 4);
             Hydroxy_anomaly = GeoUtils.mat2gray_roi(pcaResult(:,:,2), ctx.inROI);
             Fe_anomaly = GeoUtils.mat2gray_roi(pcaResult(:,:,3), ctx.inROI);
             
-            % 计算 Au_surface
             if strcmpi(ctx.mineral_type, 'cave')
                 demIndices = GeoUtils.computeDEMIndices(ctx.dem, 'cave', H, W, ctx.inROI);
-                Au_surface = enh_func(Ferric, Fe_anomaly, Hydroxy_anomaly, Clay, NDVI_inv, ...
-                    demIndices.slope, demIndices.neg_curvature);
+                Au_surface = enh_func(Ferric, Fe_anomaly, Hydroxy_anomaly, Clay, NDVI_inv, demIndices.slope, demIndices.neg_curvature);
                 Au_surface = GeoUtils.mat2gray_roi(Au_surface, ctx.inROI);
             else
                 Au_surface = enh_func(Ferric, Fe_anomaly, Hydroxy_anomaly, Clay, NDVI_inv);
             end
 
-            % === 滤波步骤 1 (严格复刻) ===
-            % imgaussfilt(sigma=8), Padding=replicate, Masked by valid pixels
-            valid_mask = ctx.inROI & ~isnan(Au_surface);
-            Au_temp = Au_surface; 
-            Au_temp(~valid_mask) = 0;
-            
+            % Filter 1
+            valid_mask = ctx.inROI & ~isnan(Au_surface); Au_temp = Au_surface; Au_temp(~valid_mask) = 0;
             Au_filt = imgaussfilt(Au_temp, 8, 'Padding', 'replicate');
             Au_surface(valid_mask) = Au_filt(valid_mask);
-            
             Au_surface = GeoUtils.mat2gray_roi(Au_surface, ctx.inROI);
             
-            % === 融合异常 ===
+            % === 融合权重 (复刻 untitled3.m 逻辑) ===
             if ~isequal(size(final_mask), size(Au_surface))
                 final_mask = imresize(final_mask, size(Au_surface), 'nearest');
             end
+            % 如果点在最终异常掩码内，潜力值增加 40%
             Au_surface(ctx.inROI) = Au_surface(ctx.inROI) .* (1 + final_mask(ctx.inROI) * 0.4);
             Au_surface(ctx.inROI & (isnan(Au_surface) | isinf(Au_surface))) = 0;
             
-            % === 滤波步骤 2 (严格复刻) ===
-            % imgaussfilt(sigma=6)
-            valid_mask = ctx.inROI & ~isnan(Au_surface);
-            Au_temp = Au_surface;
-            Au_temp(~valid_mask) = 0;
-            
+            % Filter 2
+            valid_mask = ctx.inROI & ~isnan(Au_surface); Au_temp = Au_surface; Au_temp(~valid_mask) = 0;
             Au_filt = imgaussfilt(Au_temp, 6, 'Padding', 'replicate');
             Au_surface(valid_mask) = Au_filt(valid_mask);
-            
             Au_deep = GeoUtils.mat2gray_roi(Au_surface, ctx.inROI);
 
-            % 3. 地质约束与 Top20
+            % 3. Top 20
             temp = Au_deep; temp(~ctx.inROI) = 0;
-            [~, idx] = sort(temp(:), 'descend');
-            top20 = idx(1:min(20, length(idx)));
+            [~, idx] = sort(temp(:), 'descend'); top20 = idx(1:min(20, length(idx)));
             [topY, topX] = ind2sub([H, W], top20);
-            
-            % 坐标提取 (注意 latGrid 翻转)
             latGrid_corrected = flipud(ctx.latGrid);
-            lonTop = ctx.lonGrid(top20);
-            latTop = latGrid_corrected(top20);
-            redIdx = 1:length(top20);
+            lonTop = ctx.lonGrid(top20); latTop = latGrid_corrected(top20); redIdx = 1:length(top20);
             
-            % 4. 绘图与保存
+            % 4. Visualization
             img_rgb = cat(3, GeoUtils.mat2gray_roi(ctx.Red, ctx.inROI), ...
                              GeoUtils.mat2gray_roi(ctx.Green, ctx.inROI), ...
                              GeoUtils.mat2gray_roi(ctx.Blue, ctx.inROI));
@@ -128,32 +98,26 @@ classdef PostProcessor
             Visualizer.run_resonance(F_map, delta_red, moran_local, final_mask, ...
                 depth_map*1000, grad_P, f_res_MHz, img_rgb, outDir, ctx.lonGrid, ctx.latGrid);
             
-            red_dilated = imdilate(anomaly_mask_rededge, strel('disk', 2));
-            res_Slow = safeGet('SlowVars');
-            Visualizer.run_mask_fusion(red_dilated, anomaly_mask_fabs, res_Slow.mask, ...
-                final_mask, ctx.lonGrid, ctx.latGrid, outDir);
+            % [修改] 传递 5 张掩码图
+            masks_pack = {anomaly_mask_rededge, anomaly_mask_fabs, anomaly_mask_slow, anomaly_mask_known, final_mask};
+            titles_pack = {'1.红边异常', '2.本征吸收', '3.慢变量突变', '4.已知KML异常', '5.集成并集'};
+            Visualizer.run_mask_fusion(masks_pack, titles_pack, ctx.lonGrid, ctx.latGrid, outDir);
             
             Visualizer.run_deep_prediction(Au_deep, ctx.lonGrid, ctx.latGrid, ...
                 ctx.lonROI, ctx.latROI, lonTop, latTop, redIdx, ctx.mineral_type, outDir);
             
-            % 保存
+            % 5. Save
             dataFile = fullfile(outDir, sprintf('%s_Result.mat', ctx.mineral_type));
+            Au_deep(isnan(Au_deep)) = 0; F_abs(isnan(F_abs)) = 0; depth_map(isnan(depth_map)) = 0;
+            f_res_MHz(isnan(f_res_MHz)) = 0; moran_local(isnan(moran_local)) = 0;
             
-            Au_deep(isnan(Au_deep)) = 0;
-            F_abs(isnan(F_abs)) = 0;
-            depth_map(isnan(depth_map)) = 0;
-            f_res_MHz(isnan(f_res_MHz)) = 0;
-            moran_local(isnan(moran_local)) = 0;
-            
-            final_anomaly_mask = final_mask;
-            inROI = ctx.inROI;
-            lonGrid = ctx.lonGrid;
-            latGrid = ctx.latGrid;
-            lonROI = ctx.lonROI;
-            latROI = ctx.latROI;
+            final_anomaly_mask = final_mask; inROI = ctx.inROI;
+            lonGrid = ctx.lonGrid; latGrid = ctx.latGrid; lonROI = ctx.lonROI; latROI = ctx.latROI;
             mineral_type = ctx.mineral_type;
             
+            % 保存 anomaly_mask_known
             save(dataFile, 'Au_deep', 'F_abs', 'anomaly_mask_fabs', 'anomaly_mask_rededge', ...
+                'anomaly_mask_known', ... 
                 'depth_map', 'f_res_MHz', 'final_anomaly_mask', 'inROI', ...
                 'latGrid', 'lonGrid', 'latROI', 'lonROI', 'latTop', 'lonTop', ...
                 'mineral_type', 'moran_local', 'redIdx');
