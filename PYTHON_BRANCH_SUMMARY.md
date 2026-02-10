@@ -10,8 +10,9 @@ This document summarizes the conversion of MATLAB code to Python in the `python`
 ## Branch Information / 分支信息
 
 - **Branch Name**: `python`
-- **Based On**: Main repository code
-- **Purpose**: Python implementation of remote sensing anomaly detection system
+- **Based On**: Main repository code (MATLAB version)
+- **Purpose**: Pure Python implementation of remote sensing anomaly detection system
+- **Note**: This branch contains **ONLY Python code** - all MATLAB files have been removed
 
 ## Converted Files / 已转换文件
 

@@ -21,6 +21,7 @@ python_code/
 
 Branch Status / 分支状态:
 - Branch: python
+- Python-only (all MATLAB files removed)
 - All changes committed
 - Ready for use
 
