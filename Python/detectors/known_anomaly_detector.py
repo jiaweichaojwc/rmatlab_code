@@ -7,8 +7,14 @@ from typing import Dict, Any
 import numpy as np
 from scipy.ndimage import zoom
 
-from detectors.anomaly_detector import AnomalyDetector
-from utils.kmz_mask_generator import KMZMaskGenerator
+# Use absolute imports for compatibility when running as script or from different contexts
+try:
+    from .anomaly_detector import AnomalyDetector
+    from ..utils.kmz_mask_generator import KMZMaskGenerator
+except ImportError:
+    # Fallback to absolute imports when relative imports fail
+    from detectors.anomaly_detector import AnomalyDetector
+    from utils.kmz_mask_generator import KMZMaskGenerator
 
 
 class KnownAnomalyDetector(AnomalyDetector):
