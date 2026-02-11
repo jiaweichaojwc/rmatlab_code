@@ -1,0 +1,29 @@
+# Requirements for Schumann Resonance Remote Sensing System
+# Core scientific computing
+numpy>=1.20.0
+scipy>=1.7.0
+
+# Geospatial data processing
+rasterio>=1.2.0
+shapely>=1.8.0
+pyproj>=3.2.0
+
+# Image processing
+scikit-image>=0.18.0
+Pillow>=8.0.0
+
+# Data handling
+pandas>=1.3.0
+openpyxl>=3.0.0
+
+# Visualization
+matplotlib>=3.3.0
+
+# Machine learning
+scikit-learn>=0.24.0
+
+# KMZ export
+simplekml>=1.3.0
+
+# GUI (already in Python standard library, but listed for clarity)
+# tkinter - comes with Python
