@@ -458,14 +458,16 @@ class GeoUtils:
         H, W = ref_shape
 
         # Create coordinate grids from transform
-        # For geographic coordinates
+        # Rasterio uses GDAL convention: top-left corner, y increases downward
+        # R.c = x_min, R.f = y_max (top), R.a = pixel width, R.e = pixel height (negative)
         x_min = R.c
         y_max = R.f
         x_max = x_min + R.a * W
-        y_min = y_max + R.e * H
+        y_min = y_max + R.e * H  # R.e is typically negative
 
         lon_vec = np.linspace(x_min, x_max, W)
-        lat_vec = np.linspace(y_min, y_max, H)
+        # Create lat_vec from top (y_max) to bottom (y_min) to match raster rows
+        lat_vec = np.linspace(y_max, y_min, H)
         lon_grid, lat_grid = np.meshgrid(lon_vec, lat_vec)
 
         # Handle absolute or relative ROI file path
@@ -479,9 +481,10 @@ class GeoUtils:
         roi_poly, _, _, _, lon_roi, lat_roi = GeoUtils.read_roi_robust(fullpath)
 
         # Create ROI mask
+        # Note: No flipud needed because lat_vec is already ordered top-to-bottom
         in_roi_vec = np.array([roi_poly.contains(Point(lon, lat))
                                for lon, lat in zip(lon_grid.ravel(), lat_grid.ravel())])
-        in_roi = np.flipud(in_roi_vec.reshape(H, W))
+        in_roi = in_roi_vec.reshape(H, W)
 
         # Read DEM if available
         dem_patterns = ['DEM.tif', 'DEM.tiff', 'dem.tif', 'dem.tiff']
@@ -630,7 +633,9 @@ class GeoUtils:
             interp = RectBivariateSpline(lat_src, lon_src, data, kx=1, ky=1)
             result = interp(lat_dst, lon_dst)
             result = result.astype(np.float32)
-            result[np.isnan(data).all()] = np.nan  # Preserve NaN regions
+            # Preserve NaN values in result where source had NaN
+            if np.any(np.isnan(data)):
+                result[np.isnan(result)] = np.nan
             return result
         except Exception:
             # Fallback to griddata
@@ -719,10 +724,10 @@ class GeoUtils:
         Calculate Sentinel-2 Red Edge Position (S2REP) from DN values.
 
         Args:
-            B4: Band 4 (Red) digital numbers
-            B5: Band 5 (Red Edge 1) digital numbers
-            B6: Band 6 (Red Edge 2) digital numbers
-            B7: Band 7 (Red Edge 3) digital numbers
+            B4: Band 4 (Red) reflectance values (0-1 range, typically from DN*0.0001)
+            B5: Band 5 (Red Edge 1) reflectance values
+            B6: Band 6 (Red Edge 2) reflectance values
+            B7: Band 7 (Red Edge 3) reflectance values
             scale_factors: Scale factors for each band [B4, B5, B6, B7]
             offsets: Offset values for each band [B4, B5, B6, B7]
 
@@ -730,8 +735,13 @@ class GeoUtils:
             Tuple containing:
                 - S2REP: Red Edge Position (680-760 nm)
                 - REP_QA: Quality assessment flags (0=invalid, 1=valid, 2=zero_denom, 3=invalid_reflect, 4=out_of_range)
+
+        Note:
+            The input bands should be reflectance values (0-1 range).
+            The formula multiplies by 10000 to convert to DN before applying scale factors,
+            matching the original MATLAB implementation for compatibility.
         """
-        # Convert DN to reflectance
+        # Convert to DN-like values and apply calibration (matches MATLAB implementation)
         B4_val = (B4 * 10000) * scale_factors[0] + offsets[0]
         B5_val = (B5 * 10000) * scale_factors[1] + offsets[1]
         B6_val = (B6 * 10000) * scale_factors[2] + offsets[2]
