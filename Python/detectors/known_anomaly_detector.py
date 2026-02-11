@@ -3,7 +3,7 @@ Known Anomaly Detector using KML/KMZ files.
 Extracts anomaly masks from KML/KMZ geographic data aligned with reference imagery.
 """
 import os
-from typing import Dict, Any
+from typing import Dict, Any, TYPE_CHECKING
 import numpy as np
 from scipy.ndimage import zoom
 
@@ -16,6 +16,9 @@ except ImportError:
     from detectors.anomaly_detector import AnomalyDetector
     from utils.kmz_mask_generator import KMZMaskGenerator
 
+if TYPE_CHECKING:
+    from core.geo_data_context import GeoDataContext
+
 
 class KnownAnomalyDetector(AnomalyDetector):
     """
@@ -24,7 +27,7 @@ class KnownAnomalyDetector(AnomalyDetector):
     Uses KMZMaskGenerator to process geographic data and align with image ROI.
     """
     
-    def calculate(self, ctx) -> Dict[str, Any]:
+    def calculate(self, ctx: 'GeoDataContext') -> Dict[str, Any]:
         """
         Calculate known anomaly mask from KML/KMZ file.
         
