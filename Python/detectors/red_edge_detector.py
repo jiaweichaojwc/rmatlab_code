@@ -8,6 +8,14 @@ from .anomaly_detector import AnomalyDetector
 from ..utils.geo_utils import GeoUtils
 
 
+# Sentinel-2 L2A calibration parameters for red edge bands (B4-B7)
+S2_SCALE_FACTORS = [1.9997e-05, 1.9998e-05, 1.9998e-05, 1.9999e-05]
+S2_OFFSETS = [-0.1, -0.1, -0.1, -0.1]
+
+# Red edge spectral center wavelength in nanometers
+RED_EDGE_CENTER_WAVELENGTH_NM = 705
+
+
 class RedEdgeDetector(AnomalyDetector):
     """
     Red Edge Position based anomaly detector.
@@ -39,21 +47,19 @@ class RedEdgeDetector(AnomalyDetector):
                     - delta_red_edge: Red edge shift from center
                     - moran_local: Local Moran's I values
         """
-        # 1. Get bands (indices are 1-based in MATLAB, converted internally)
-        B4 = GeoUtils.get_band(ctx.s2, 3)  # Band 3 -> Red (B4)
-        B5 = GeoUtils.get_band(ctx.s2, 7)  # Band 7 -> Red Edge 1 (B5)
-        B6 = GeoUtils.get_band(ctx.s2, 8)  # Band 8 -> Red Edge 2 (B6)
-        B7 = GeoUtils.get_band(ctx.s2, 9)  # Band 9 -> Red Edge 3 (B7)
+        # 1. Get bands (using 1-based indices, converted internally by get_band)
+        # Sentinel-2 band indices: 3=Red(B4), 7=RedEdge1(B5), 8=RedEdge2(B6), 9=RedEdge3(B7)
+        B4 = GeoUtils.get_band(ctx.s2, 3)
+        B5 = GeoUtils.get_band(ctx.s2, 7)
+        B6 = GeoUtils.get_band(ctx.s2, 8)
+        B7 = GeoUtils.get_band(ctx.s2, 9)
         
         # 2. Calculate S2REP (Red Edge Position)
-        scale_factors = [1.9997e-05, 1.9998e-05, 1.9998e-05, 1.9999e-05]
-        offsets = [-0.1, -0.1, -0.1, -0.1]
-        S2REP, _ = GeoUtils.calculate_s2rep_from_dn(B4, B5, B6, B7, scale_factors, offsets)
+        S2REP, _ = GeoUtils.calculate_s2rep_from_dn(B4, B5, B6, B7, S2_SCALE_FACTORS, S2_OFFSETS)
         
         # 3. Calculate F_map (anomaly intensity)
-        lambda_center = 705
-        delta_red_edge = S2REP - lambda_center
-        F_map = np.abs(delta_red_edge) / lambda_center
+        delta_red_edge = S2REP - RED_EDGE_CENTER_WAVELENGTH_NM
+        F_map = np.abs(delta_red_edge) / RED_EDGE_CENTER_WAVELENGTH_NM
         
         # 4. Moran I calculation (strictly replicating untitled.m logic)
         
