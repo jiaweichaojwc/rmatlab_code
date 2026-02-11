@@ -43,7 +43,7 @@ class IntrinsicDetector(AnomalyDetector):
                 - ast: ASTER data cube (H x W x 14)
                 - inROI: Boolean ROI mask (H x W)
                 - mineral_type: Type of mineral for threshold selection
-                - levashov_mode: Optional flag for Levashov threshold adjustment (default: False)
+                - levashov_mode: Optional flag for Levashov threshold adjustment (default behavior: not enabled if missing)
         
         Returns:
             Dictionary with:
