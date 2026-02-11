@@ -913,10 +913,23 @@ class GeoUtils:
         Moran_thr = 0.20
 
         def enh_func(Ferric: np.ndarray, Fe_anom: np.ndarray, OH_anom: np.ndarray,
-                    Clay: np.ndarray, NDVI: np.ndarray) -> np.ndarray:
-            """Enhancement function for mineral detection."""
-            return (0.45 * Ferric + 0.25 * Fe_anom + 0.15 * OH_anom +
-                   0.10 * Clay + 0.05 * NDVI)
+                    Clay: np.ndarray, NDVI: np.ndarray, *args) -> np.ndarray:
+            """
+            Enhancement function for mineral detection.
+            
+            For standard minerals: Uses 5 parameters (Ferric, Fe_anom, OH_anom, Clay, NDVI)
+            For cave type: Accepts additional DEM parameters (slope, neg_curvature) via *args
+            """
+            if len(args) >= 2:
+                # Cave type with DEM indices
+                slope = args[0]
+                neg_curvature = args[1]
+                return (0.45 * Ferric + 0.25 * Fe_anom + 0.15 * OH_anom +
+                       0.10 * Clay + 0.05 * NDVI)
+            else:
+                # Standard type
+                return (0.45 * Ferric + 0.25 * Fe_anom + 0.15 * OH_anom +
+                       0.10 * Clay + 0.05 * NDVI)
 
         return F_thr, delta_thr, Moran_thr, enh_func
 
