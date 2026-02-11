@@ -64,11 +64,13 @@ class SlowVarsDetector(AnomalyDetector):
         # Iron oxide ratio from Landsat bands
         iron_oxide = ctx.lan[:, :, 2] / (ctx.lan[:, :, 1] + eps)
         
-        # Oxygen fugacity from Sentinel-2 SWIR bands
-        swir1 = ctx.s2[:, :, 7]  # Band 8 (index 7)
-        swir2 = ctx.s2[:, :, 8]  # Band 9 (index 8)
-        swir_mean = np.mean(np.stack([swir1, swir2], axis=2), axis=2)
-        oxy_fug = swir2 - swir_mean
+        # Oxygen fugacity from Sentinel-2 Red Edge bands
+        # Note: S2 band order is B02,B03,B04,B08,B11,B12,B05,B06,B07
+        # So index 7 = B06 (Red Edge 2), index 8 = B07 (Red Edge 3)
+        re2 = ctx.s2[:, :, 7]  # Band 6 (B06 - Red Edge 2)
+        re3 = ctx.s2[:, :, 8]  # Band 7 (B07 - Red Edge 3)
+        re_mean = np.mean(np.stack([re2, re3], axis=2), axis=2)
+        oxy_fug = re3 - re_mean
         
         # Handle invalid values
         oxy_fug[np.isnan(oxy_fug) | np.isinf(oxy_fug)] = 0
@@ -80,8 +82,8 @@ class SlowVarsDetector(AnomalyDetector):
                      np.abs(oxy_fug - oxy_mean))
         
         # 3. Fluid overpressure (流体超压)
-        # Mean of ASTER TIR bands (10-14)
-        tir_mean = np.mean(ctx.ast[:, :, 9:13], axis=2)
+        # Mean of ASTER TIR bands (10-14 in MATLAB = indices 9-13 in Python)
+        tir_mean = np.mean(ctx.ast[:, :, 9:14], axis=2)
         
         # NDVI calculation
         ndvi = (ctx.NIR - ctx.Red) / (ctx.NIR + ctx.Red + eps)
