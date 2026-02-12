@@ -30,9 +30,22 @@ classdef GeoDataContext < handle
             if isfield(config, 'kmz_path'), obj.kmz_path = config.kmz_path; end
             if isfield(config, 'kmz_keywords'), obj.kmz_keywords = config.kmz_keywords; end
             
-            % 1. 获取路径 (交互/自动)
-            [data_dir_local, roi_file, obj.belt_lon, obj.belt_lat] = GeoUtils.getRegionConfig(obj.region_type);
-            obj.data_dir = data_dir_local;
+            % 1. 获取路径 (优先使用 config 中的路径，否则交互选择)
+            if isfield(config, 'data_dir') && ~isempty(config.data_dir) && ...
+               isfield(config, 'roi_file') && ~isempty(config.roi_file)
+                % GUI 模式：直接使用传入的路径
+                obj.data_dir = config.data_dir;
+                
+                % 【关键修正】这里必须定义变量 roi_file，供后续 readDEMandROI 调用
+                roi_file = config.roi_file; 
+                
+                % 依然利用 GeoUtils 获取范围
+                [obj.belt_lon, obj.belt_lat] = GeoUtils.get_belt_coords(fileparts(roi_file), roi_file);
+            else
+                % 脚本模式：交互选择
+                [data_dir_local, roi_file, obj.belt_lon, obj.belt_lat] = GeoUtils.getRegionConfig(obj.region_type);
+                obj.data_dir = data_dir_local;
+            end
             
             % 2. 读取数据
             fprintf('  [Context] Loading data from: %s\n', obj.data_dir);

@@ -1,0 +1,377 @@
+classdef MineralApp < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure             matlab.ui.Figure
+        GridLayout           matlab.ui.container.GridLayout
+        LeftPanel            matlab.ui.container.Panel
+        RightPanel           matlab.ui.container.Panel
+        
+        % Inputs
+        DirLabel             matlab.ui.control.Label
+        DirEdit              matlab.ui.control.EditField
+        DirBtn               matlab.ui.control.Button
+        
+        ROILabel             matlab.ui.control.Label
+        ROIEdit              matlab.ui.control.EditField
+        ROIBtn               matlab.ui.control.Button
+        
+        MineralLabel         matlab.ui.control.Label
+        MineralDropDown      matlab.ui.control.DropDown
+        
+        KMZCheckBox          matlab.ui.control.CheckBox
+        KMZEdit              matlab.ui.control.EditField
+        KMZBtn               matlab.ui.control.Button
+        
+        % Detectors
+        DetectorPanel        matlab.ui.container.Panel
+        cbRedEdge            matlab.ui.control.CheckBox
+        cbIntrinsic          matlab.ui.control.CheckBox
+        cbSlowVars           matlab.ui.control.CheckBox
+        cbKnown              matlab.ui.control.CheckBox
+        
+        % Actions
+        RunBtn               matlab.ui.control.Button
+        StatusArea           matlab.ui.control.TextArea
+        
+        % Visualization Tabs & Images [核心修改：拆分为多个Tab和Image对象]
+        ResultTabs           matlab.ui.container.TabGroup
+        
+        TabLog               matlab.ui.container.Tab
+        
+        TabResonance         matlab.ui.container.Tab
+        ImageResonance       matlab.ui.control.Image
+        
+        TabFusion            matlab.ui.container.Tab
+        ImageFusion          matlab.ui.control.Image
+        
+        TabPrediction        matlab.ui.container.Tab
+        ImagePrediction      matlab.ui.control.Image
+    end
+
+    properties (Access = private)
+        % Internal Data
+        Config struct
+    end
+
+    methods (Access = private)
+        
+        % Helper: Log message
+        function log(app, msg)
+            timestamp = datestr(now, 'HH:MM:SS');
+            newMsg = sprintf('[%s] %s', timestamp, msg);
+            app.StatusArea.Value = [app.StatusArea.Value; {newMsg}];
+            fprintf('%s\n', newMsg); % Also print to command window
+            scroll(app.StatusArea, 'bottom');
+            drawnow;
+        end
+
+        % Callback: Select Data Directory
+        function selectDataDir(app, ~)
+            sel = uigetdir(pwd, '选择 Data 数据文件夹');
+            if sel ~= 0
+                app.DirEdit.Value = sel;
+                app.log(sprintf('已选择数据目录: %s', sel));
+            end
+        end
+
+        % Callback: Select ROI File
+        function selectROI(app, ~)
+            [f, p] = uigetfile({'*.xlsx';'*.xls';'*.csv'}, '选择坐标文件');
+            if f ~= 0
+                fullPath = fullfile(p, f);
+                app.ROIEdit.Value = fullPath;
+                app.log(sprintf('已选择坐标文件: %s', f));
+            end
+        end
+
+        % Callback: Select KML File
+        function selectKML(app, ~)
+            [f, p] = uigetfile({'*.kml';'*.kmz'}, '选择已知异常 KML/KMZ');
+            if f ~= 0
+                fullPath = fullfile(p, f);
+                app.KMZEdit.Value = fullPath;
+                app.KMZCheckBox.Value = true;
+                app.cbKnown.Value = true; % Auto check the detector
+                app.log(sprintf('已选择 KML 文件: %s', f));
+            end
+        end
+
+        % Callback: Run Analysis
+        function runAnalysis(app, ~)
+            % 1. Validation
+            if isempty(app.DirEdit.Value) || isempty(app.ROIEdit.Value)
+                uialert(app.UIFigure, '请先选择数据文件夹和坐标文件！', '配置错误');
+                return;
+            end
+            
+            app.RunBtn.Enable = 'off';
+            app.RunBtn.Text = '正在运行...';
+            app.log('=== 开始新的分析任务 ===');
+            
+            % 清空旧图片显示
+            app.ImageResonance.ImageSource = '';
+            app.ImageFusion.ImageSource = '';
+            app.ImagePrediction.ImageSource = '';
+            app.ResultTabs.SelectedTab = app.TabLog; % 切回日志看进度
+            
+            try
+                % 2. Build Config
+                cfg = struct();
+                cfg.mineral_type = app.MineralDropDown.Value;
+                cfg.region_type = ''; % Force manual/GUI mode
+                cfg.levashov_mode = true;
+                cfg.fusion_mode = true;
+                
+                % Inject Paths
+                cfg.data_dir = app.DirEdit.Value;
+                cfg.roi_file = app.ROIEdit.Value;
+                
+                % KML Config
+                detectors_to_use = {};
+                if app.cbRedEdge.Value, detectors_to_use{end+1} = 'RedEdge'; end
+                if app.cbIntrinsic.Value, detectors_to_use{end+1} = 'Intrinsic'; end
+                if app.cbSlowVars.Value, detectors_to_use{end+1} = 'SlowVars'; end
+                
+                if app.KMZCheckBox.Value && ~isempty(app.KMZEdit.Value)
+                    cfg.kmz_path = app.KMZEdit.Value;
+                    cfg.kmz_keywords = {'矿体投影', 'Object ID', 'ZK', '异常', '已知矿点'};
+                    if app.cbKnown.Value
+                        detectors_to_use{end+1} = 'KnownAnomaly';
+                    end
+                    app.log('KML 模块已启用');
+                else
+                    cfg.kmz_path = '';
+                end
+                
+                if isempty(detectors_to_use)
+                    error('请至少选择一个探测器！');
+                end
+                
+                % 3. Initialize Context
+                app.log('正在初始化数据上下文 (GeoDataContext)...');
+                dataCtx = GeoDataContext(cfg);
+                
+                % 4. Output Path Construction
+                types_str = strjoin(detectors_to_use, '_');
+                folder_name = [types_str, '_Result_', cfg.mineral_type, '_', datestr(now, 'yyyymmdd_HHMM')];
+                cfg.outDir = fullfile(dataCtx.data_dir, folder_name);
+                if ~exist(cfg.outDir, 'dir'), mkdir(cfg.outDir); end
+                app.log(sprintf('结果输出路径: %s', cfg.outDir));
+                
+                % 5. Fusion Engine
+                app.log('初始化融合引擎...');
+                engine = FusionEngine();
+                
+                if any(strcmp(detectors_to_use, 'RedEdge')), engine.addDetector('RedEdge', RedEdgeDetector()); end
+                if any(strcmp(detectors_to_use, 'Intrinsic')), engine.addDetector('Intrinsic', IntrinsicDetector()); end
+                if any(strcmp(detectors_to_use, 'SlowVars')), engine.addDetector('SlowVars', SlowVarsDetector()); end
+                if any(strcmp(detectors_to_use, 'KnownAnomaly')), engine.addDetector('KnownAnomaly', KnownAnomalyDetector()); end
+                
+                % 6. Compute
+                app.log('开始计算各异常层 (ComputeAll)...');
+                engine.computeAll(dataCtx);
+                
+                % 7. Fusion & PostProcess
+                app.log('执行结果融合与后处理...');
+                final_mask = engine.getFusedMask(detectors_to_use);
+                PostProcessor.run(dataCtx, engine, final_mask, cfg.outDir);
+                
+                app.log('✅ 所有流程完成！');
+                app.log(['结果已保存至: ', cfg.outDir]);
+                
+                % ================= 8. 加载三张结果图 [核心修改] =================
+                
+                % (1) 加载 01_共振参数综合图
+                img01 = fullfile(cfg.outDir, '01_共振参数综合图.png');
+                if exist(img01, 'file')
+                    app.ImageResonance.ImageSource = img01;
+                end
+                
+                % (2) 加载 02_掩码集成_x图 (文件名包含动态数字，需模糊搜索)
+                dir02 = dir(fullfile(cfg.outDir, '02_掩码集成_*.png'));
+                if ~isempty(dir02)
+                    img02 = fullfile(dir02(1).folder, dir02(1).name);
+                    app.ImageFusion.ImageSource = img02;
+                end
+                
+                % (3) 加载 03_深部成矿预测图
+                img03 = fullfile(cfg.outDir, '03_深部成矿预测图.png');
+                if exist(img03, 'file')
+                    app.ImagePrediction.ImageSource = img03;
+                    % 默认切换到最有用的深部预测图
+                    app.ResultTabs.SelectedTab = app.TabPrediction;
+                end
+                
+            catch ME
+                app.log(['❌ 错误: ', ME.message]);
+                disp(getReport(ME)); 
+                uialert(app.UIFigure, ME.message, '运行错误');
+            end
+            
+            app.RunBtn.Enable = 'on';
+            app.RunBtn.Text = '开始运行分析';
+        end
+    end
+
+    % App initialization and layout
+    methods (Access = public)
+        function createComponents(app)
+            % Main Figure
+            app.UIFigure = uifigure('Position', [100, 100, 1100, 700]); % 再次加宽，方便看图
+            app.UIFigure.Name = '舒曼波共振遥感 - 智能分析系统';
+            
+            % Grid Layout
+            app.GridLayout = uigridlayout(app.UIFigure);
+            app.GridLayout.ColumnWidth = {320, '1x'};
+            app.GridLayout.RowHeight = {'1x'};
+            
+            % --- Left Panel (Controls) ---
+            app.LeftPanel = uipanel(app.GridLayout);
+            app.LeftPanel.Layout.Row = 1;
+            app.LeftPanel.Layout.Column = 1;
+            app.LeftPanel.Title = '参数配置';
+            app.LeftPanel.FontSize = 14; 
+            app.LeftPanel.FontWeight = 'bold';
+            
+            lpLayout = uigridlayout(app.LeftPanel);
+            lpLayout.ColumnWidth = {'1x', 40};
+            lpLayout.RowHeight = {22, 25, 22, 25, 22, 25, 22, 25, 220, 50, '1x'};
+            
+            % 1. Data Dir
+            app.DirLabel = uilabel(lpLayout, 'Text', '1. Data 数据文件夹:');
+            app.DirLabel.FontSize = 13;
+            app.DirLabel.Layout.Row = 1; app.DirLabel.Layout.Column = [1 2];
+            
+            app.DirEdit = uieditfield(lpLayout, 'Editable', false);
+            app.DirEdit.Layout.Row = 2; app.DirEdit.Layout.Column = 1;
+            
+            app.DirBtn = uibutton(lpLayout, 'Text', '...');
+            app.DirBtn.Layout.Row = 2; app.DirBtn.Layout.Column = 2;
+            app.DirBtn.ButtonPushedFcn = createCallbackFcn(app, @selectDataDir, true);
+            
+            % 2. ROI File
+            app.ROILabel = uilabel(lpLayout, 'Text', '2. 坐标文件 (.xlsx):');
+            app.ROILabel.FontSize = 13;
+            app.ROILabel.Layout.Row = 3; app.ROILabel.Layout.Column = [1 2];
+            
+            app.ROIEdit = uieditfield(lpLayout, 'Editable', false);
+            app.ROIEdit.Layout.Row = 4; app.ROIEdit.Layout.Column = 1;
+            
+            app.ROIBtn = uibutton(lpLayout, 'Text', '...');
+            app.ROIBtn.Layout.Row = 4; app.ROIBtn.Layout.Column = 2;
+            app.ROIBtn.ButtonPushedFcn = createCallbackFcn(app, @selectROI, true);
+            
+            % 3. Mineral Type
+            app.MineralLabel = uilabel(lpLayout, 'Text', '3. 目标矿种:');
+            app.MineralLabel.FontSize = 13;
+            app.MineralLabel.Layout.Row = 5; app.MineralLabel.Layout.Column = [1 2];
+            
+            app.MineralDropDown = uidropdown(lpLayout);
+            app.MineralDropDown.Items = {'gold', 'copper', 'iron', 'lead', 'zinc', 'coal', 'petroleum', 'gas', 'rare_earth', 'lithium'};
+            app.MineralDropDown.Value = 'gold';
+            app.MineralDropDown.FontSize = 13;
+            app.MineralDropDown.Layout.Row = 6; app.MineralDropDown.Layout.Column = [1 2];
+            
+            % 4. KML Config
+            app.KMZCheckBox = uicheckbox(lpLayout, 'Text', '导入 KML/KMZ 已知异常');
+            app.KMZCheckBox.FontSize = 13;
+            app.KMZCheckBox.Layout.Row = 7; app.KMZCheckBox.Layout.Column = [1 2];
+            
+            app.KMZEdit = uieditfield(lpLayout, 'Editable', false);
+            app.KMZEdit.Placeholder = 'KML 文件路径...';
+            app.KMZEdit.Layout.Row = 8; app.KMZEdit.Layout.Column = 1;
+            
+            app.KMZBtn = uibutton(lpLayout, 'Text', '...');
+            app.KMZBtn.Layout.Row = 8; app.KMZBtn.Layout.Column = 2;
+            app.KMZBtn.ButtonPushedFcn = createCallbackFcn(app, @selectKML, true);
+            
+            % 5. Detectors Panel
+            app.DetectorPanel = uipanel(lpLayout, 'Title', '启用的探测器 (多选)');
+            app.DetectorPanel.Layout.Row = 9; app.DetectorPanel.Layout.Column = [1 2];
+            app.DetectorPanel.FontSize = 14; 
+            app.DetectorPanel.FontWeight = 'bold';
+            
+            dpLayout = uigridlayout(app.DetectorPanel, 'ColumnWidth', {'1x'}, 'RowHeight', {'1x','1x','1x','1x'});
+            dpLayout.RowSpacing = 8;
+            dpLayout.Padding = [20 10 20 10];
+            
+            app.cbRedEdge = uicheckbox(dpLayout, 'Text', 'RedEdge (红边)', 'Value', true);
+            app.cbRedEdge.FontSize = 14; 
+            app.cbRedEdge.FontWeight = 'bold';
+            app.cbRedEdge.Layout.Row = 1;
+            
+            app.cbIntrinsic = uicheckbox(dpLayout, 'Text', 'Intrinsic (本征吸收)', 'Value', true);
+            app.cbIntrinsic.FontSize = 14; 
+            app.cbIntrinsic.FontWeight = 'bold';
+            app.cbIntrinsic.Layout.Row = 2;
+            
+            app.cbSlowVars = uicheckbox(dpLayout, 'Text', 'SlowVars (慢变量)', 'Value', false);
+            app.cbSlowVars.FontSize = 14; 
+            app.cbSlowVars.FontWeight = 'bold';
+            app.cbSlowVars.Layout.Row = 3;
+            
+            app.cbKnown = uicheckbox(dpLayout, 'Text', 'KnownAnomaly (KML)', 'Value', false);
+            app.cbKnown.FontSize = 14; 
+            app.cbKnown.FontWeight = 'bold';
+            app.cbKnown.Layout.Row = 4;
+            
+            % 6. Run Button
+            app.RunBtn = uibutton(lpLayout, 'Text', '开始运行分析', ...
+                'BackgroundColor', [0.2, 0.6, 0.2], ...
+                'FontColor', 'w', ...
+                'FontWeight', 'bold', ...
+                'FontSize', 16);
+            app.RunBtn.Layout.Row = 10; app.RunBtn.Layout.Column = [1 2];
+            app.RunBtn.ButtonPushedFcn = createCallbackFcn(app, @runAnalysis, true);
+            
+            
+            % --- Right Panel (Visualization & Logs) ---
+            app.RightPanel = uipanel(app.GridLayout);
+            app.RightPanel.Layout.Row = 1;
+            app.RightPanel.Layout.Column = 2;
+            app.RightPanel.BorderType = 'none';
+            
+            rpLayout = uigridlayout(app.RightPanel, 'RowHeight', {'1x'}, 'ColumnWidth', {'1x'});
+            
+            % [核心修改] 创建 Tab 组，包含4个选项卡
+            app.ResultTabs = uitabgroup(rpLayout);
+            app.ResultTabs.Layout.Row = 1; app.ResultTabs.Layout.Column = 1;
+            
+            % Tab 1: 运行日志
+            app.TabLog = uitab(app.ResultTabs, 'Title', '运行日志');
+            logLayout = uigridlayout(app.TabLog, 'ColumnWidth', {'1x'}, 'RowHeight', {'1x'});
+            app.StatusArea = uitextarea(logLayout, 'Editable', false);
+            app.StatusArea.FontSize = 12;
+            app.StatusArea.Layout.Row = 1; app.StatusArea.Layout.Column = 1;
+            app.StatusArea.Value = {'=== 系统就绪，请配置参数 ==='};
+            
+            % Tab 2: 共振参数
+            app.TabResonance = uitab(app.ResultTabs, 'Title', '1. 共振参数');
+            resLayout = uigridlayout(app.TabResonance, 'ColumnWidth', {'1x'}, 'RowHeight', {'1x'});
+            app.ImageResonance = uiimage(resLayout);
+            app.ImageResonance.ScaleMethod = 'fit';
+            app.ImageResonance.Layout.Row = 1; app.ImageResonance.Layout.Column = 1;
+            
+            % Tab 3: 掩码集成
+            app.TabFusion = uitab(app.ResultTabs, 'Title', '2. 掩码集成');
+            fusLayout = uigridlayout(app.TabFusion, 'ColumnWidth', {'1x'}, 'RowHeight', {'1x'});
+            app.ImageFusion = uiimage(fusLayout);
+            app.ImageFusion.ScaleMethod = 'fit';
+            app.ImageFusion.Layout.Row = 1; app.ImageFusion.Layout.Column = 1;
+            
+            % Tab 4: 深部预测
+            app.TabPrediction = uitab(app.ResultTabs, 'Title', '3. 深部预测');
+            predLayout = uigridlayout(app.TabPrediction, 'ColumnWidth', {'1x'}, 'RowHeight', {'1x'});
+            app.ImagePrediction = uiimage(predLayout);
+            app.ImagePrediction.ScaleMethod = 'fit';
+            app.ImagePrediction.Layout.Row = 1; app.ImagePrediction.Layout.Column = 1;
+            
+        end
+
+        function app = MineralApp()
+            createComponents(app);
+            registerApp(app, app.UIFigure);
+        end
+    end
+end
