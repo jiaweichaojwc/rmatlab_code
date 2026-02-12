@@ -105,6 +105,7 @@ class IntrinsicDetector(AnomalyDetector):
         # 5. Morphological denoising
         selem = square(3)
         mask = opening(mask, selem)
+        mask = mask.astype(float)  # Convert back to float after morphological operation
         
         # Return results
         result = {
