@@ -6,9 +6,42 @@ from pyproj import Transformer
 import matplotlib.font_manager as fm
 import simplekml
 import os
+import io
 import sys
 from scipy.spatial import ConvexHull
 from scipy.interpolate import splprep, splev  # 导入样条插值库
+
+# ==================== 强制 UTF-8 输出，防止 Windows 控制台 GBK 报错 ====================
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+# ==================== 新增：自动获取矿种颜色函数 ====================
+def get_mineral_color(m_type):
+    """
+    根据矿种自动返回对应的 KML 颜色配置。
+    注意：自定义十六进制颜色在 KML 中的格式是 AABBGGRR (透明度, 蓝, 绿, 红)
+    """
+    m_type = str(m_type).lower().strip() # 提取字符串并转小写
+    color_map = {
+        'gold': simplekml.Color.yellow,        # 金：金色
+        'copper': "FF3373B8",                  # 铜：铜色
+        'coal': simplekml.Color.black,         # 煤：黑色
+        'petroleum': simplekml.Color.black,    # 石油：黑色
+        'offshore_petroleum': simplekml.Color.black, # 海底石油：黑色
+        'gas': simplekml.Color.blue,           # 天然气：蓝色
+        'coalbed_gas': simplekml.Color.blue,   # 煤层气：蓝色
+        'tin': "FFC0C0D8",                     # 锡
+        'phosphate': "FF8B0000",               # 磷
+        'iron': "FFA02020",                    # 铁
+        'fluorite': "FF00BFFF",                # 萤石
+        'zinc': "FFA8A8C0",                    # 锌
+        'molybdenum': "FF383848",              # 钼
+        'lead': "FF808080",                    # 铅/灰色
+        'silver': "FFC0C0C0",                  # 银
+        'aluminum': "FFE6E6FA"                 # 铝
+    }
+    # 兜底颜色：如果遇到未配置在字典中的矿种，默认显示红色
+    return color_map.get(m_type, simplekml.Color.red)
 
 # ==================== 0. 核心全局配置（只需修改这里！） ====================
 # 基础阈值：控制热力图最小值、红色粗线起始值、透明度计算基准
@@ -20,18 +53,8 @@ LEVEL_STEP = 0.01
 # 重点区域层级步长：红色粗线的间隔
 HIGH_LEVEL_STEP = 0.01
 
-# ========== 等高线颜色配置接口 ==========
-FILL_COLOR = simplekml.Color.yellow  #金色
-#FILL_COLOR = "FF3373B8"  # 铜色
-#FILL_COLOR = simplekml.Color.black  # 石油黑色和煤
-#FILL_COLOR = simplekml.Color.black  # 天然气蓝色
-#FILL_COLOR = "FFC0C0D8"  #锡
-#FILL_COLOR = "FF8B0000"    #磷
-#FILL_COLOR = "FFA02020"  # 铁
-#FILL_COLOR = "FF00BFFF"  # 萤石
-#FILL_COLOR = "FF808080"
-#FILL_COLOR = "FFA8A8C0"  # 锌
-#FILL_COLOR = "FF383848"  # 钼
+# [已移除静态的 FILL_COLOR，移至读取数据后动态获取]
+
 FILL_ALPHA_BASE = 80  # 等高线基础透明度（0-255）
 FILL_ALPHA_MAX = 200  # 等高线最大透明度
 LINE_COLOR = simplekml.Color.white  # 等高线边线色
@@ -87,7 +110,16 @@ if 'lonROI' in mat_data and 'latROI' in mat_data:
 lonTop = mat_data['lonTop'].flatten() if 'lonTop' in mat_data else np.array([])
 latTop = mat_data['latTop'].flatten() if 'latTop' in mat_data else np.array([])
 redIdx = mat_data['redIdx'].flatten() if 'redIdx' in mat_data else np.array([])
-mineral_type = mat_data['mineral_type'][0] if 'mineral_type' in mat_data else 'gold'
+
+# ★ 提取矿种名称并防患数组嵌套
+mineral_type_raw = mat_data['mineral_type'][0] if 'mineral_type' in mat_data else 'gold'
+if isinstance(mineral_type_raw, np.ndarray):
+    mineral_type_raw = mineral_type_raw[0]
+mineral_type = str(mineral_type_raw)
+
+# ★ 动态分配等高线填充颜色
+FILL_COLOR = get_mineral_color(mineral_type)
+print(f"✅ 当前数据矿种解析为: [{mineral_type}], 已自动应用对应 KMZ 填充颜色。")
 
 # --- 全局变量定义 ---
 n_points = min(10, len(lonTop)) if len(lonTop) > 0 else 0
@@ -214,7 +246,7 @@ def create_figure(transparent=False):
         ax.set_position([0, 0, 1, 1])
     else:
         ax.set_aspect('equal')
-        ax.set_title(f'2025 {mineral_type} 矿深部预测（UTM Zone {utm_zone}）', fontsize=20)
+        ax.set_title(f'2026 {mineral_type} 矿深部预测（UTM Zone {utm_zone}）', fontsize=20)
         ax.set_xlabel(f'UTM X (m)', fontsize=16)
         ax.set_ylabel(f'UTM Y (m)', fontsize=16)
         cbar = fig.colorbar(contourf, ax=ax, location='bottom', shrink=0.8)
