@@ -35,18 +35,18 @@ class GeoDataContext:
         lan (np.ndarray): Landsat-8 data cube
         ast (np.ndarray): ASTER data cube
         dem (np.ndarray): Digital Elevation Model data
-        inROI (np.ndarray): Boolean mask indicating pixels within ROI
+        in_roi (np.ndarray): Boolean mask indicating pixels within ROI
         R (Dict): Spatial reference information
-        lonGrid (np.ndarray): Longitude grid
-        latGrid (np.ndarray): Latitude grid
-        lonROI (np.ndarray): Longitude coordinates of ROI boundary
-        latROI (np.ndarray): Latitude coordinates of ROI boundary
+        lon_grid (np.ndarray): Longitude grid
+        lat_grid (np.ndarray): Latitude grid
+        lon_roi (np.ndarray): Longitude coordinates of ROI boundary
+        lat_roi (np.ndarray): Latitude coordinates of ROI boundary
         belt_lon (np.ndarray): Longitude coordinates of belt region
         belt_lat (np.ndarray): Latitude coordinates of belt region
-        NIR (np.ndarray): Near-infrared band (combined from S2/Landsat)
-        Red (np.ndarray): Red band (combined from S2/Landsat)
-        Green (np.ndarray): Green band (combined from S2/Landsat)
-        Blue (np.ndarray): Blue band (combined from S2/Landsat)
+        nir (np.ndarray): Near-infrared band (combined from S2/Landsat)
+        red (np.ndarray): Red band (combined from S2/Landsat)
+        green (np.ndarray): Green band (combined from S2/Landsat)
+        blue (np.ndarray): Blue band (combined from S2/Landsat)
     """
     
     def __init__(self, config: Dict[str, Any]) -> None:
@@ -83,22 +83,22 @@ class GeoDataContext:
         self.dem: Optional[np.ndarray] = None
         
         # Spatial reference and ROI
-        self.inROI: Optional[np.ndarray] = None
+        self.in_roi: Optional[np.ndarray] = None
         self.R: Optional[Dict[str, Any]] = None
-        self.lonGrid: Optional[np.ndarray] = None
-        self.latGrid: Optional[np.ndarray] = None
-        self.lonROI: Optional[np.ndarray] = None
-        self.latROI: Optional[np.ndarray] = None
+        self.lon_grid: Optional[np.ndarray] = None
+        self.lat_grid: Optional[np.ndarray] = None
+        self.lon_roi: Optional[np.ndarray] = None
+        self.lat_roi: Optional[np.ndarray] = None
         
         # Belt coordinates
         self.belt_lon: Optional[np.ndarray] = None
         self.belt_lat: Optional[np.ndarray] = None
         
         # Band shortcuts
-        self.NIR: Optional[np.ndarray] = None
-        self.Red: Optional[np.ndarray] = None
-        self.Green: Optional[np.ndarray] = None
-        self.Blue: Optional[np.ndarray] = None
+        self.nir: Optional[np.ndarray] = None
+        self.red: Optional[np.ndarray] = None
+        self.green: Optional[np.ndarray] = None
+        self.blue: Optional[np.ndarray] = None
         
         # Load data
         self._load_data(config)
@@ -138,14 +138,14 @@ class GeoDataContext:
         self.ast = GeoUtils.read_aster(self.data_dir, self.R)
         
         # Read DEM and ROI
-        self.dem, self.inROI, self.lonGrid, self.latGrid, self.lonROI, self.latROI = \
+        self.dem, self.in_roi, self.lon_grid, self.lat_grid, self.lon_roi, self.lat_roi = \
             GeoUtils.read_dem_and_roi(self.data_dir, roi_file, self.R)
         
         # Extract common bands
-        self.NIR = GeoUtils.get_band(self.s2, self.lan, idx=4)
-        self.Red = GeoUtils.get_band(self.s2, self.lan, idx=3)
-        self.Green = GeoUtils.get_band(self.s2, self.lan, idx=2)
-        self.Blue = GeoUtils.get_band(self.s2, self.lan, idx=1)
+        self.nir = GeoUtils.get_band(self.s2, self.lan, idx=4)
+        self.red = GeoUtils.get_band(self.s2, self.lan, idx=3)
+        self.green = GeoUtils.get_band(self.s2, self.lan, idx=2)
+        self.blue = GeoUtils.get_band(self.s2, self.lan, idx=1)
         
         # Fill ASTER NaN values
         self.fill_aster_nan()
@@ -158,7 +158,7 @@ class GeoDataContext:
         pixels within the ROI and fills any NaN pixels within the ROI with
         this mean value. This ensures complete data coverage within the ROI.
         """
-        if self.ast is None or self.inROI is None:
+        if self.ast is None or self.in_roi is None:
             return
         
         # Iterate through each band
@@ -166,13 +166,13 @@ class GeoDataContext:
             band_data = self.ast[:, :, b].copy()
             
             # Get ROI values
-            roi_vals = band_data[self.inROI]
+            roi_vals = band_data[self.in_roi]
             
             # Calculate mean, ignoring NaN values
             mean_val = np.nanmean(roi_vals)
             
             # Fill NaN values within ROI with mean
             if not np.isnan(mean_val):
-                mask = self.inROI & np.isnan(band_data)
+                mask = self.in_roi & np.isnan(band_data)
                 band_data[mask] = mean_val
                 self.ast[:, :, b] = band_data
