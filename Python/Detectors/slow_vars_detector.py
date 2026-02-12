@@ -4,7 +4,7 @@ Slow Variables Detector using Cardano's discriminant for stability analysis.
 
 import numpy as np
 from scipy.ndimage import generic_filter
-from skimage.filters import canny
+from skimage.feature import canny
 from skimage.morphology import binary_opening, remove_small_objects, binary_dilation, disk
 from typing import Dict, Any
 from .anomaly_detector import AnomalyDetector
