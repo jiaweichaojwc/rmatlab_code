@@ -95,7 +95,7 @@ NIR = GeoUtils.getBand(s2, lan, 4)  # Still uses 4, converted internally
 |-----------|--------|--------|
 | Resize | `imresize()` | `scipy.ndimage.zoom()` |
 | Gaussian filter | `imgaussfilt()` | `scipy.ndimage.gaussian_filter()` |
-| Edge detection | `edge('canny')` | `skimage.filters.canny()` |
+| Edge detection | `edge('canny')` | `skimage.feature.canny()` |
 | Morphology | `bwareaopen()` | `skimage.morphology.remove_small_objects()` |
 | Opening | `imopen()` | `scipy.ndimage.grey_opening()` |
 | Dilation | `imdilate()` | `skimage.morphology.dilation()` |

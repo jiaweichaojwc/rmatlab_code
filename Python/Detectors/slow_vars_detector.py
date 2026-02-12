@@ -4,7 +4,7 @@ Converted from MATLAB SlowVarsDetector.m
 """
 
 import numpy as np
-from skimage import filters
+from skimage import feature
 from skimage.morphology import remove_small_objects, dilation, disk, binary_dilation
 import sys
 import os
@@ -43,7 +43,7 @@ class SlowVarsDetector(AnomalyDetector):
         fluid_over = tir_mean + 3 * (1 - ndvi)
         
         # 4. Fault activity
-        edges = filters.canny(stress_grad, sigma=1.0, low_threshold=0.05, high_threshold=0.25)
+        edges = feature.canny(stress_grad, sigma=1.0, low_threshold=0.05, high_threshold=0.25)
         # Remove small connected components
         edges_cleaned = remove_small_objects(edges, min_size=50)
         fault_activity = edges_cleaned.astype(float) * stress_grad
