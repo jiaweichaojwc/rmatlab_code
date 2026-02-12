@@ -21,9 +21,9 @@ LEVEL_STEP = 0.01
 HIGH_LEVEL_STEP = 0.01
 
 # ========== 等高线颜色配置接口 ==========
-#FILL_COLOR = simplekml.Color.yellow  #金色
+FILL_COLOR = simplekml.Color.yellow  #金色
 #FILL_COLOR = "FF3373B8"  # 铜色
-FILL_COLOR = simplekml.Color.black  # 石油黑色和煤
+#FILL_COLOR = simplekml.Color.black  # 石油黑色和煤
 #FILL_COLOR = simplekml.Color.black  # 天然气蓝色
 #FILL_COLOR = "FFC0C0D8"  #锡
 #FILL_COLOR = "FF8B0000"    #磷
