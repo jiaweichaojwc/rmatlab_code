@@ -28,9 +28,9 @@ classdef RedEdgeDetector < AnomalyDetector
             F_std = std(F_map(:), 'omitnan');
             
             % --- 方案 B: 仅 ROI 统计 (理论上更科学，但会导致结果与原版不同) ---
-            % F_vals = F_map(ctx.inROI);
-            % F_mean = mean(F_vals, 'omitnan');
-            % F_std = std(F_vals, 'omitnan');
+            F_vals = F_map(ctx.inROI);
+            F_mean = mean(F_vals, 'omitnan');
+            F_std = std(F_vals, 'omitnan');
             
             if F_std == 0, F_std = eps; end
             Z = (F_map - F_mean) ./ F_std;
