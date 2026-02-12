@@ -160,6 +160,7 @@ class PostProcessor:
             au_surface = GeoUtils.mat2gray_roi(au_surface, ctx.in_roi)
         else:
             au_surface = enh_func(ferric, fe_anomaly, hydroxy_anomaly, clay, ndvi_inv)
+            au_surface = GeoUtils.mat2gray_roi(au_surface, ctx.in_roi)
         
         # Filter 1: First Gaussian smoothing
         valid_mask = ctx.in_roi & ~np.isnan(au_surface)
