@@ -32,10 +32,10 @@ class RedEdgeDetector(AnomalyDetector):
             Dictionary with 'mask' (binary array) and 'debug' (intermediate results)
         """
         # 1. Get spectral bands
-        B4 = GeoUtils.get_band(ctx.s2, band_index=3)
-        B5 = GeoUtils.get_band(ctx.s2, band_index=7)
-        B6 = GeoUtils.get_band(ctx.s2, band_index=8)
-        B7 = GeoUtils.get_band(ctx.s2, band_index=9)
+        B4 = GeoUtils.get_band(ctx.s2, idx=3)
+        B5 = GeoUtils.get_band(ctx.s2, idx=7)
+        B6 = GeoUtils.get_band(ctx.s2, idx=8)
+        B7 = GeoUtils.get_band(ctx.s2, idx=9)
         
         # 2. Calculate S2REP (red edge position)
         scale_factors = [1.9997e-05, 1.9998e-05, 1.9998e-05, 1.9999e-05]
