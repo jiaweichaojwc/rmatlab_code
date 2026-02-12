@@ -53,6 +53,10 @@ class FusionEngine:
             res = self.results[name]
             current_mask = res['mask']
             
+            # Ensure mask is boolean or numeric
+            if not isinstance(current_mask, np.ndarray):
+                current_mask = np.array(current_mask)
+            
             # Unify size
             if fused_mask is None:
                 fused_mask = current_mask.copy()
@@ -63,8 +67,10 @@ class FusionEngine:
                                    fused_mask.shape[1] / current_mask.shape[1])
                     current_mask = zoom(current_mask, zoom_factors, order=0)
                 
-                # OR logic fusion
-                fused_mask = fused_mask | current_mask
+                # Convert to boolean for OR operation, then back to float
+                fused_mask_bool = fused_mask.astype(bool)
+                current_mask_bool = current_mask.astype(bool)
+                fused_mask = (fused_mask_bool | current_mask_bool).astype(float)
         
         fused_mask = fused_mask.astype(float)
         print(f'>>> 融合完成，包含了: {", ".join(names_list)}')

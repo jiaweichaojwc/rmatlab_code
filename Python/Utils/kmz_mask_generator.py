@@ -168,6 +168,9 @@ class KMZMaskGenerator:
                 # Convert geographic to pixel coordinates
                 try:
                     rows, cols = rowcol(transform, x, y)
+                    # Convert tuples to numpy arrays
+                    rows = np.array(rows)
+                    cols = np.array(cols)
                 except:
                     # Manual calculation fallback
                     cols = ((x - self.tif_limits['xMin']) / pixel_width).astype(int)
@@ -194,7 +197,10 @@ class KMZMaskGenerator:
                 # Convert to pixel coordinates
                 try:
                     rows, cols = rowcol(transform, [x], [y])
-                    r, c = rows[0], cols[0]
+                    # Convert tuples to arrays/values
+                    rows = np.array(rows) if not isinstance(rows, np.ndarray) else rows
+                    cols = np.array(cols) if not isinstance(cols, np.ndarray) else cols
+                    r, c = int(rows[0]), int(cols[0])
                 except:
                     c = int((x - self.tif_limits['xMin']) / pixel_width)
                     r = int((self.tif_limits['yMax'] - y) / pixel_height)
