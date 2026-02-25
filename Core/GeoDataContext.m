@@ -8,6 +8,7 @@ classdef GeoDataContext < handle
         % [新增] KML 配置
         kmz_path
         kmz_keywords
+        kmz_threshold = 0.6 % [新增] 默认阈值
         
         % 路径信息
         data_dir 
@@ -29,6 +30,7 @@ classdef GeoDataContext < handle
             % 接收 KML 配置
             if isfield(config, 'kmz_path'), obj.kmz_path = config.kmz_path; end
             if isfield(config, 'kmz_keywords'), obj.kmz_keywords = config.kmz_keywords; end
+            if isfield(config, 'kmz_threshold'), obj.kmz_threshold = config.kmz_threshold; end % [新增] 接收界面阈值
             
             % 1. 获取路径 (优先使用 config 中的路径，否则交互选择)
             if isfield(config, 'data_dir') && ~isempty(config.data_dir) && ...

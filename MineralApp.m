@@ -30,6 +30,10 @@ classdef MineralApp < matlab.apps.AppBase
         cbSlowVars           matlab.ui.control.CheckBox
         cbKnown              matlab.ui.control.CheckBox
         
+        % KMZ Threshold (New)
+        KMZThresholdLabel    matlab.ui.control.Label
+        KMZThresholdEdit     matlab.ui.control.NumericEditField
+        
         % Task Name (New)
         TaskNameLabel        matlab.ui.control.Label
         TaskNameEdit         matlab.ui.control.EditField
@@ -207,6 +211,9 @@ classdef MineralApp < matlab.apps.AppBase
                 cfg.levashov_mode = true;
                 cfg.fusion_mode = true;
                 
+                % [新增] 读取界面配置的 KMZ 阈值
+                cfg.kmz_threshold = app.KMZThresholdEdit.Value;
+                
                 cfg.data_dir = app.DirEdit.Value;
                 cfg.roi_file = app.ROIEdit.Value;
                 
@@ -329,8 +336,9 @@ classdef MineralApp < matlab.apps.AppBase
             
             lpLayout = uigridlayout(app.LeftPanel);
             lpLayout.ColumnWidth = {'1x', 40};
-            % [调整行高] 增加 TaskName(25) 和 Actions(40)
-            lpLayout.RowHeight = {22, 25, 22, 25, 22, 25, 22, 25, 220, 22, 25, 50, 40, '1x'};
+            
+            % [修改] 增加行高，容纳置信度控件
+            lpLayout.RowHeight = {22, 25, 22, 25, 22, 25, 22, 25, 220, 22, 25, 22, 25, 50, 40, '1x'};
             
             % 1. Data Dir
             app.DirLabel = uilabel(lpLayout, 'Text', '1. Data 数据文件夹:');
@@ -399,25 +407,35 @@ classdef MineralApp < matlab.apps.AppBase
             app.cbKnown = uicheckbox(dpLayout, 'Text', 'KnownAnomaly (KML)', 'Value', false, 'FontSize', 14, 'FontWeight', 'bold');
             app.cbKnown.Layout.Row = 4;
             
-            % 6. Task Name (New)
-            app.TaskNameLabel = uilabel(lpLayout, 'Text', '4. 任务名称 (可选，留空则自动命名):');
+            % 6. KMZ 导出置信度阈值 (New)
+            app.KMZThresholdLabel = uilabel(lpLayout, 'Text', '4. 生成KMZ置信度 (0~1):');
+            app.KMZThresholdLabel.FontSize = 13;
+            app.KMZThresholdLabel.Layout.Row = 10; app.KMZThresholdLabel.Layout.Column = [1 2];
+            
+            app.KMZThresholdEdit = uieditfield(lpLayout, 'numeric');
+            app.KMZThresholdEdit.Limits = [0.1 1.0];
+            app.KMZThresholdEdit.Value = 0.6; % 默认值0.6
+            app.KMZThresholdEdit.Layout.Row = 11; app.KMZThresholdEdit.Layout.Column = [1 2];
+            
+            % 7. Task Name
+            app.TaskNameLabel = uilabel(lpLayout, 'Text', '5. 任务名称 (可选，留空则自动命名):');
             app.TaskNameLabel.FontSize = 13;
             app.TaskNameLabel.FontColor = [0.4 0.4 0.4]; % 灰色提示
-            app.TaskNameLabel.Layout.Row = 10; app.TaskNameLabel.Layout.Column = [1 2];
+            app.TaskNameLabel.Layout.Row = 12; app.TaskNameLabel.Layout.Column = [1 2];
             
             app.TaskNameEdit = uieditfield(lpLayout);
             app.TaskNameEdit.Placeholder = '例如: 新疆金矿_测试01';
-            app.TaskNameEdit.Layout.Row = 11; app.TaskNameEdit.Layout.Column = [1 2];
+            app.TaskNameEdit.Layout.Row = 13; app.TaskNameEdit.Layout.Column = [1 2];
             
-            % 7. Run Button
+            % 8. Run Button
             app.RunBtn = uibutton(lpLayout, 'Text', '开始运行分析', ...
                 'BackgroundColor', [0.2, 0.6, 0.2], 'FontColor', 'w', 'FontWeight', 'bold', 'FontSize', 16);
-            app.RunBtn.Layout.Row = 12; app.RunBtn.Layout.Column = [1 2];
+            app.RunBtn.Layout.Row = 14; app.RunBtn.Layout.Column = [1 2];
             app.RunBtn.ButtonPushedFcn = createCallbackFcn(app, @runAnalysis, true);
             
-            % 8. Action Buttons (Grid inside Grid for side-by-side buttons)
+            % 9. Action Buttons (Grid inside Grid for side-by-side buttons)
             actionGrid = uigridlayout(lpLayout, 'RowHeight', {'1x'}, 'ColumnWidth', {'1x', '1x'});
-            actionGrid.Layout.Row = 13; actionGrid.Layout.Column = [1 2];
+            actionGrid.Layout.Row = 15; actionGrid.Layout.Column = [1 2];
             actionGrid.Padding = [0 0 0 0];
             
             app.SaveAsBtn = uibutton(actionGrid, 'Text', '另存结果为...', 'Enable', 'off');

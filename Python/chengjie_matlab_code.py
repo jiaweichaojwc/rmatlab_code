@@ -22,7 +22,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # ==================== ★ 0. 核心全局配置 (学术高级感设置) ★ ====================
 BASE_THRESHOLD = 0.4  # 基础阈值
-KEY_AREA_THRESHOLD = 0.6  # 重点区域阈值 (KMZ 导出起点)
+KEY_AREA_THRESHOLD = 0.6  # 重点区域阈值 (将优先从 MATLAB 数据中动态读取)
 STEP_NUM = 24  # 24阶梯度，兼顾平滑与地貌层次感
 
 TOP_AREA_FILL_ALPHA = 100  # 靶区覆盖透明度
@@ -64,7 +64,6 @@ except Exception as e:
 
 lonGrid = mat_data['lonGrid']
 latGrid = mat_data['latGrid']
-# 注：假设 MATLAB 导出的预测值矩阵名固定为 'Au_deep' (无论何种矿种)
 Au_deep = mat_data['Au_deep']
 
 has_roi = 'lonROI' in mat_data and 'latROI' in mat_data
@@ -81,41 +80,36 @@ if isinstance(mineral_type_raw, np.ndarray):
     mineral_type_raw = mineral_type_raw[0]
 mineral_type = str(mineral_type_raw).lower()
 
-# ==================== ★ 修复点：让 ORE_CALC_TYPE 同时接管色彩样式 ★ ====================
+# ==================== ★ 核心修复：读取 MATLAB 透传过来的置信度 ★ ====================
+if 'kmz_threshold' in mat_data:
+    threshold_raw = mat_data['kmz_threshold']
+    if isinstance(threshold_raw, np.ndarray):
+        KEY_AREA_THRESHOLD = float(threshold_raw.flatten()[0])
+    else:
+        KEY_AREA_THRESHOLD = float(threshold_raw)
+    print(f"✅ 从 MATLAB 成功读取到自定义 KMZ 导出置信度阈值: {KEY_AREA_THRESHOLD}")
+else:
+    print(f"⚠️ 未检测到自定义阈值，使用默认值: {KEY_AREA_THRESHOLD}")
+# ==================================================================================
+
+# 让 ORE_CALC_TYPE 同时接管色彩样式
 if ORE_CALC_TYPE != '':
     mineral_type = ORE_CALC_TYPE.lower()
-# ========================================================================================
 
 
-# ==================== ★ 3. 核心矩阵计算逻辑分支 ★ ====================
+# ==================== 3. 核心矩阵计算逻辑分支 ====================
 print(f"当前设置的计算类型为: '{ORE_CALC_TYPE}'")
 if ORE_CALC_TYPE == '':
-    # ---------------------------------------------------------
-    # 默认逻辑：严格保持与 four.m / untitled2.m 一致的计算逻辑
-    # ---------------------------------------------------------
     print("--> 正在执行默认矩阵计算 (确保与 untitled2.m 逻辑完全一致)...")
-
-    # 【请在此处填入 untitled2.m 里的具体数学运算代码】
-    # 示例: Au_deep = Au_deep * 1.0
-
 else:
-    # ---------------------------------------------------------
-    # 自定义逻辑：当输入了特定的矿体类型时，执行你专属的逻辑
-    # ---------------------------------------------------------
     print(f"--> 检测到特定矿体 '{ORE_CALC_TYPE}'，正在执行专属矩阵运算...")
 
     if ORE_CALC_TYPE.lower() == 'petroleum':
         print("--> 匹配为: 石油 (Petroleum) 专属计算逻辑")
-        # 【请在此处填入针对该矿体的专属计算代码】
-        # 示例: Au_deep = np.power(Au_deep, 2)
-
     elif ORE_CALC_TYPE == 'Au_vein':
         print("--> 匹配为: 金矿脉专属逻辑")
-        # 示例: Au_deep = np.log1p(Au_deep)
-
     else:
         print(f"--> 匹配为: '{ORE_CALC_TYPE}' 通用专属逻辑")
-        pass
 
 # ==================== 4. 动态矿种/资源色彩体系配置 ====================
 RESOURCE_STYLES = {
@@ -177,23 +171,18 @@ if n_points > 0:
 
 utm_x_grid, utm_y_grid = transformer_ll2utm.transform(lonGrid, latGrid)
 
-# 将处理后的 Au_deep 进行翻转以适应图像坐标系
 Au_deep_flip = np.flipud(Au_deep)
 utm_x_ROI, utm_y_ROI = (transformer_ll2utm.transform(lonROI, latROI) if has_roi and len(lonROI) > 0 else (None, None))
 
-# 构建 cKDTree (提升鼠标悬停时的拾取性能)
 points_grid = np.column_stack((utm_x_grid.ravel(), utm_y_grid.ravel()))
 kdtree = cKDTree(points_grid)
 
-
-# ==================== 辅助函数：样条光滑 ====================
 def smooth_polygon(x, y, num_points=100):
     x, y = x[:-1], y[:-1]
     tck, u = splprep([x, y], k=3, per=True, s=0)
     u_new = np.linspace(u.min(), u.max(), num_points)
     x_new, y_new = splev(u_new, tck)
     return np.append(x_new, x_new[0]), np.append(y_new, y_new[0])
-
 
 def get_top_convex_hull(lon_arr, lat_arr, transformer, smooth_num=TOP_AREA_SMOOTH_POINTS):
     utm_x, utm_y = transformer.transform(lon_arr, lat_arr)
@@ -210,26 +199,23 @@ def get_top_convex_hull(lon_arr, lat_arr, transformer, smooth_num=TOP_AREA_SMOOT
 auto_cmap = plt.get_cmap(COLOR_THEME)
 step_levels = np.linspace(BASE_THRESHOLD, 1.0, STEP_NUM + 1)
 
-
 def create_figure(transparent=False):
     fig, ax = plt.subplots(figsize=(14, 11), facecolor='none' if transparent else 'white')
 
-    # 1. 基础热力图填充
     contour_plot = ax.contourf(utm_x_grid, utm_y_grid, Au_deep_flip, levels=step_levels, cmap=auto_cmap, extend='both',
                                zorder=0)
 
-    # 2. 黑色精细等值线
     ax.contour(utm_x_grid, utm_y_grid, Au_deep_flip, levels=step_levels, colors='black', linewidths=0.5, alpha=0.4,
                zorder=1)
 
-    # 3. 重点高异常区线 (动态颜色)
-    ax.contour(utm_x_grid, utm_y_grid, Au_deep_flip, levels=[KEY_AREA_THRESHOLD], colors=KEY_LINE_COLOR, linewidths=2.5,
+    # 绘制高亮起点线 (避免浮点数导致找不到对应的 level)
+    actual_key_level = min(step_levels, key=lambda x: abs(x - KEY_AREA_THRESHOLD))
+    ax.contour(utm_x_grid, utm_y_grid, Au_deep_flip, levels=[actual_key_level], colors=KEY_LINE_COLOR, linewidths=2.5,
                zorder=3)
 
     if has_roi and utm_x_ROI is not None:
         ax.plot(utm_x_ROI, utm_y_ROI, 'k-', linewidth=3, zorder=5)
 
-    # 4. 绘制 Top 点位及平滑覆盖区
     if n_points > 0:
         hull_utm, _ = get_top_convex_hull(lonTop[:n_points], latTop[:n_points], transformer_ll2utm)
         ax.fill(hull_utm[0], hull_utm[1], color=TOP_FILL_COLOR, alpha=TOP_AREA_FILL_ALPHA / 255, zorder=8)
@@ -249,7 +235,6 @@ def create_figure(transparent=False):
     else:
         ax.set_aspect('equal')
         mineral_name = mineral_type.capitalize()
-        # 动态调整标题，显示当前逻辑
         logic_title = "默认逻辑" if ORE_CALC_TYPE == '' else f"{ORE_CALC_TYPE} 专属逻辑"
         ax.set_title(f'2026 {mineral_name} 资源深部预测 - 学术高级制图 ({logic_title})', fontsize=20, pad=15)
         cbar = fig.colorbar(contour_plot, ax=ax, location='bottom', shrink=0.8,
@@ -270,14 +255,11 @@ info_text = ax_interactive.text(
 )
 info_text.set_visible(False)
 
-
-# 使用 cKDTree 高效查询最近点
 def get_value_at_xy(x, y):
     lon, lat = transformer_utm2ll.transform(x, y)
     dist, idx = kdtree.query([x, y])
     min_idx = np.unravel_index(idx, Au_deep_flip.shape)
     return lon, lat, round(Au_deep_flip[min_idx], 4)
-
 
 def on_hover(event):
     if event.inaxes == ax_interactive and event.xdata is not None:
@@ -289,7 +271,6 @@ def on_hover(event):
         info_text.set_visible(False)
     fig_interactive.canvas.draw_idle()
 
-
 fig_interactive.canvas.mpl_connect('motion_notify_event', on_hover)
 plt.tight_layout()
 plt.show(block=True)
@@ -298,7 +279,6 @@ plt.show(block=True)
 print("正在生成地图叠加包 (KMZ)...")
 fig_kml, ax_kml = create_figure(transparent=True)
 
-# 动态后缀，防止文件覆盖
 logic_suffix = "Default" if ORE_CALC_TYPE == '' else ORE_CALC_TYPE
 img_filename = f"【{mineral_type.capitalize()}】预测图_学术高级版_{logic_suffix}.png"
 img_path = os.path.join(output_dir, img_filename)
@@ -306,7 +286,7 @@ plt.savefig(img_path, dpi=300, transparent=True, bbox_inches='tight', pad_inches
 plt.close(fig_kml)
 
 kml = simplekml.Kml()
-kml.document.name = f"{mineral_type.capitalize()} 资源深部预测 - 学术标准"
+kml.document.name = f"{mineral_type.capitalize()} 资源深部预测 - 学术标准 (阈值≥{KEY_AREA_THRESHOLD})"
 
 # 底图层
 ground = kml.newgroundoverlay(name="预测图层")
@@ -317,7 +297,10 @@ ground.color = 'CC000000'
 
 # 矢量层 (重点成矿区)
 fol_zones = kml.newfolder(name=f"高潜力区 (≥{KEY_AREA_THRESHOLD})")
-kmz_levels = [lvl for lvl in step_levels if lvl >= KEY_AREA_THRESHOLD]
+
+# 【核心修复】引入 -1e-4 补偿浮点数精度误差，确保 0.7 能够正确识别
+kmz_levels = [lvl for lvl in step_levels if lvl >= KEY_AREA_THRESHOLD - 1e-4]
+
 if kmz_levels:
     cnt_kmz = ax_kml.contour(utm_x_grid, utm_y_grid, Au_deep_flip, levels=kmz_levels, alpha=0)
     for i, level in enumerate(cnt_kmz.levels):
@@ -351,11 +334,11 @@ if n_points > 0:
         pnt = fol_top.newpoint(name=f"Target_{i + 1}", coords=[(lonTop[i], latTop[i])])
         pnt.style.iconstyle.scale = 1.0 if (i + 1) in redIdx else 0.7
 
-kmz_path = os.path.join(output_dir, f"【{mineral_type.capitalize()}】预测图_学术高级版_{logic_suffix}.kmz")
+kmz_path = os.path.join(output_dir, f"【{mineral_type.capitalize()}】预测图_学术高级版_阈值{KEY_AREA_THRESHOLD}.kmz")
 kml.savekmz(kmz_path)
 
 print(f"处理完成！")
 print(f"当前资源样式：{mineral_type.capitalize()}")
 print(f"运算逻辑状态：{'默认 (untitled2.m同步)' if ORE_CALC_TYPE == '' else f'专属 ({ORE_CALC_TYPE})'}")
-print(f"数据源：{data_path}")
+print(f"输出阈值基准：{KEY_AREA_THRESHOLD}")
 print(f"输出目录：{output_dir}")

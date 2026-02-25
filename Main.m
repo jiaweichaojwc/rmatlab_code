@@ -12,6 +12,7 @@ config.region_type  = '';
 
 config.levashov_mode = true;
 config.fusion_mode = true;
+config.kmz_threshold = 0.6;
 
 % ================= 2. [新增] KML 已知异常配置 (交互式选择) =================
 fprintf('>>> [交互模式] 是否导入 KML/KMZ 已知异常文件 (第4掩码)？\n');

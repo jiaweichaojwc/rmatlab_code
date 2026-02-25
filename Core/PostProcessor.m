@@ -119,7 +119,15 @@ classdef PostProcessor
             Visualizer.run_deep_prediction(Au_deep, ctx.lonGrid, ctx.latGrid, ...
                 ctx.lonROI, ctx.latROI, lonTop, latTop, redIdx, ctx.mineral_type, outDir);
             
-            % 5. Save (修复：增加 anomaly_mask_slow 的保存)
+            % ==========================================
+            % [新增] 提取出 kmz_threshold 以供 Python 读取
+            kmz_threshold = 0.6; % 默认值
+            if isprop(ctx, 'kmz_threshold') && ~isempty(ctx.kmz_threshold)
+                kmz_threshold = ctx.kmz_threshold;
+            end
+            % ==========================================
+
+            % 5. Save (增加 kmz_threshold 保存)
             dataFile = fullfile(outDir, sprintf('%s_Result.mat', ctx.mineral_type));
             Au_deep(isnan(Au_deep)) = 0; F_abs(isnan(F_abs)) = 0; depth_map(isnan(depth_map)) = 0;
             f_res_MHz(isnan(f_res_MHz)) = 0; moran_local(isnan(moran_local)) = 0;
@@ -128,12 +136,11 @@ classdef PostProcessor
             lonGrid = ctx.lonGrid; latGrid = ctx.latGrid; lonROI = ctx.lonROI; latROI = ctx.latROI;
             mineral_type = ctx.mineral_type;
             
-            % 👇 把 anomaly_mask_slow 加进去了
             save(dataFile, 'Au_deep', 'F_abs', 'anomaly_mask_fabs', 'anomaly_mask_rededge', ...
                 'anomaly_mask_slow', 'anomaly_mask_known', ... 
                 'depth_map', 'f_res_MHz', 'final_anomaly_mask', 'inROI', ...
                 'latGrid', 'lonGrid', 'latROI', 'lonROI', 'latTop', 'lonTop', ...
-                'mineral_type', 'moran_local', 'redIdx');
+                'mineral_type', 'moran_local', 'redIdx', 'kmz_threshold');
             
             exportKMZ(dataFile, outDir);
         end
