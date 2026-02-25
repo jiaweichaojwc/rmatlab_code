@@ -32,10 +32,11 @@ function status = exportKMZ(dataFile, outDir)
     % ================= 2. 设置 Python 解释器路径 =================
     % ⚠️⚠️⚠️ 请根据你的实际 Conda 环境修改此处 ⚠️⚠️⚠️
     % 之前代码中的路径:
-    py_exe = 'C:\Users\Deep-Lei\.conda\envs\scts\python.exe'; 
+    py_exe = 'C:\Users\Administrator\.conda\envs\scts\python.exe'; 
     
     % 如果你在 Deep-Lei 用户下，建议核实一下路径，例如:
     % py_exe = 'C:\Users\Deep-Lei\.conda\envs\scts\python.exe'; 
+    %py_exe = C:\Users\Administrator\.conda\envs\scts\python.exe
 
     % ================= 3. 构造并执行指令 =================
     % 使用双引号包裹所有路径，防止空格或特殊字符导致错误
