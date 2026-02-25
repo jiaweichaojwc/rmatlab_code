@@ -1,82 +1,47 @@
-#承接matlab跑出的程序然后绘制KMZ和将经纬度转化为UTM
+# ==============================================================================
+# 深部矿产预测可视化与 KMZ 导出系统 (学术高级终极版)
+# 包含: 动态多矿种色彩匹配、cKDTree 交互提速、高质量平滑凸包、UTM 智能投影、动态计算核心
+# ==============================================================================
+
 import scipy.io as sio
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from pyproj import Transformer
 import matplotlib.font_manager as fm
 import simplekml
 import os
 import io
 import sys
-from scipy.spatial import ConvexHull
-from scipy.interpolate import splprep, splev  # 导入样条插值库
+from scipy.spatial import ConvexHull, cKDTree
+from scipy.interpolate import splprep, splev
 
 # ==================== 强制 UTF-8 输出，防止 Windows 控制台 GBK 报错 ====================
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-# ==================== 新增：自动获取矿种颜色函数 ====================
-def get_mineral_color(m_type):
-    """
-    根据矿种自动返回对应的 KML 颜色配置。
-    注意：自定义十六进制颜色在 KML 中的格式是 AABBGGRR (透明度, 蓝, 绿, 红)
-    """
-    m_type = str(m_type).lower().strip() # 提取字符串并转小写
-    color_map = {
-        'gold': simplekml.Color.yellow,        # 金：金色
-        'copper': "FF3373B8",                  # 铜：铜色
-        'coal': simplekml.Color.black,         # 煤：黑色
-        'petroleum': simplekml.Color.black,    # 石油：黑色
-        'offshore_petroleum': simplekml.Color.black, # 海底石油：黑色
-        'gas': simplekml.Color.blue,           # 天然气：蓝色
-        'coalbed_gas': simplekml.Color.blue,   # 煤层气：蓝色
-        'tin': "FFC0C0D8",                     # 锡
-        'phosphate': "FF8B0000",               # 磷
-        'iron': "FFA02020",                    # 铁
-        'fluorite': "FF00BFFF",                # 萤石
-        'zinc': "FFA8A8C0",                    # 锌
-        'molybdenum': "FF383848",              # 钼
-        'lead': "FF808080",                    # 铅/灰色
-        'silver': "FFC0C0C0",                  # 银
-        'aluminum': "FFE6E6FA"                 # 铝
-    }
-    # 兜底颜色：如果遇到未配置在字典中的矿种，默认显示红色
-    return color_map.get(m_type, simplekml.Color.red)
+# ==================== ★ 0. 核心全局配置 (学术高级感设置) ★ ====================
+BASE_THRESHOLD = 0.4  # 基础阈值
+KEY_AREA_THRESHOLD = 0.6  # 重点区域阈值 (KMZ 导出起点)
+STEP_NUM = 24  # 24阶梯度，兼顾平滑与地貌层次感
 
-# ==================== 0. 核心全局配置（只需修改这里！） ====================
-# 基础阈值：控制热力图最小值、红色粗线起始值、透明度计算基准
-BASE_THRESHOLD = 0.4
-# 重点区域阈值：控制KMZ中导出的等高线最小值
-KEY_AREA_THRESHOLD = 0.6
-# 基础层级步长：白色细网格线的间隔
-LEVEL_STEP = 0.01
-# 重点区域层级步长：红色粗线的间隔
-HIGH_LEVEL_STEP = 0.01
+TOP_AREA_FILL_ALPHA = 100  # 靶区覆盖透明度
+TOP_AREA_LINE_WIDTH = 3  # 靶区边界线宽
+TOP_AREA_SMOOTH_POINTS = 100  # 靶区平滑点数
 
-# [已移除静态的 FILL_COLOR，移至读取数据后动态获取]
-
-FILL_ALPHA_BASE = 80  # 等高线基础透明度（0-255）
-FILL_ALPHA_MAX = 200  # 等高线最大透明度
-LINE_COLOR = simplekml.Color.white  # 等高线边线色
-LINE_WIDTH = 1  # 等高线边线宽度
-
-# ========== Top整体区域配置（含光滑度配置！） ==========
-TOP_AREA_FILL_COLOR = simplekml.Color.purple  # Top整体区域填充色（紫色）
-TOP_AREA_FILL_ALPHA = 100  # 区域填充透明度
-TOP_AREA_LINE_COLOR = simplekml.Color.white  # 区域边线色
-TOP_AREA_LINE_WIDTH = 3  # 区域边线宽度
-TOP_AREA_SMOOTH_POINTS = 100
-# ===============================================
-
-# ==================== 1. 配置与路径设置 (核心修改点) ====================
-# 自动接收来自 MATLAB 的动态路径参数，若无参数则使用默认值
+# ==================== 1. 配置与路径设置 ====================
 if len(sys.argv) > 2:
-    data_path = sys.argv[1]    # 接收 MATLAB 的 dataFile 路径
-    output_dir = sys.argv[2]   # 接收 MATLAB 的 outDir 路径
+    data_path = sys.argv[1]  # 接收 MATLAB 的 dataFile 路径
+    output_dir = sys.argv[2]  # 接收 MATLAB 的 outDir 路径
 else:
     # 默认路径备用
-    data_path = r''
-    output_dir = r''
+    data_path = r"C:\Users\Deep-Lei\Desktop\gold\Intrinsic_Result_gold_20260213_1049\gold_Result.mat"
+    output_dir = r"C:\Users\Deep-Lei\Desktop"
+
+# ==================== ★ 新增：在这里直接输入你的矿体计算类型 ★ ====================
+# 如果为 ''，则走默认逻辑；如果输入特定字符串（如 'Au_vein', 'petroleum'），则走专属计算和专属配色
+ORE_CALC_TYPE = ''
+# ====================================================================================
 
 # --- 配置中文字体 ---
 plt.rcParams['font.size'] = 10
@@ -90,307 +55,307 @@ except:
 
 os.makedirs(output_dir, exist_ok=True)
 
-# ==================== 2. 数据读取 ====================
-mat_data = sio.loadmat(data_path)
+# ==================== 2. 数据读取与矿种解析 ====================
+try:
+    mat_data = sio.loadmat(data_path)
+except Exception as e:
+    print(f"读取 MAT 文件失败: {e}")
+    sys.exit(1)
+
 lonGrid = mat_data['lonGrid']
 latGrid = mat_data['latGrid']
+# 注：假设 MATLAB 导出的预测值矩阵名固定为 'Au_deep' (无论何种矿种)
 Au_deep = mat_data['Au_deep']
 
-# --- 读取 ROI (方框区域) ---
-has_roi = False
-lonROI = np.array([])
-latROI = np.array([])
-if 'lonROI' in mat_data and 'latROI' in mat_data:
-    lonROI = mat_data['lonROI'].flatten()
-    latROI = mat_data['latROI'].flatten()
-    if len(lonROI) > 0 and len(latROI) > 0:
-        has_roi = True
+has_roi = 'lonROI' in mat_data and 'latROI' in mat_data
+lonROI = mat_data['lonROI'].flatten() if has_roi else np.array([])
+latROI = mat_data['latROI'].flatten() if has_roi else np.array([])
 
-# --- 读取 点位 ---
 lonTop = mat_data['lonTop'].flatten() if 'lonTop' in mat_data else np.array([])
 latTop = mat_data['latTop'].flatten() if 'latTop' in mat_data else np.array([])
 redIdx = mat_data['redIdx'].flatten() if 'redIdx' in mat_data else np.array([])
 
-# ★ 提取矿种名称并防患数组嵌套
-mineral_type_raw = mat_data['mineral_type'][0] if 'mineral_type' in mat_data else 'gold'
+# 解析矿种以匹配颜色
+mineral_type_raw = mat_data['mineral_type'][0] if 'mineral_type' in mat_data else 'other'
 if isinstance(mineral_type_raw, np.ndarray):
     mineral_type_raw = mineral_type_raw[0]
-mineral_type = str(mineral_type_raw)
+mineral_type = str(mineral_type_raw).lower()
 
-# ★ 动态分配等高线填充颜色
-FILL_COLOR = get_mineral_color(mineral_type)
-print(f"✅ 当前数据矿种解析为: [{mineral_type}], 已自动应用对应 KMZ 填充颜色。")
-
-# --- 全局变量定义 ---
-n_points = min(10, len(lonTop)) if len(lonTop) > 0 else 0
-# 预处理Top点位UTM坐标（后续复用，避免重复计算）
-utm_x_Top, utm_y_Top = np.array([]), np.array([])
-if n_points > 0:
-    avg_lon = np.mean(lonGrid)
-    utm_zone = int((avg_lon + 180) / 6) + 1
-    crs_utm = f'EPSG:326{utm_zone}'
-    temp_transformer = Transformer.from_crs("EPSG:4326", crs_utm, always_xy=True)
-    utm_x_Top, utm_y_Top = temp_transformer.transform(lonTop[:n_points], latTop[:n_points])
+# ==================== ★ 修复点：让 ORE_CALC_TYPE 同时接管色彩样式 ★ ====================
+if ORE_CALC_TYPE != '':
+    mineral_type = ORE_CALC_TYPE.lower()
+# ========================================================================================
 
 
-# ==================== 辅助函数：凸包生成 + 样条光滑（核心修改！） ====================
-def smooth_polygon(x, y, num_points=100):
-    """
-    对多边形坐标做B样条插值光滑处理，保持闭合
-    :param x: 原始多边形x坐标数组
-    :param y: 原始多边形y坐标数组
-    :param num_points: 光滑后生成的顶点数，越多越光滑
-    :return: 光滑后的x、y坐标数组
-    """
-    # 移除最后一个点（与第一个点重复，避免插值异常）
-    x = x[:-1]
-    y = y[:-1]
-    # 样条插值（k=3为B样条，保证曲线光滑；per=1表示闭合曲线）
-    tck, u = splprep([x, y], k=3, per=True, s=0)
-    # 生成新的插值点
-    u_new = np.linspace(u.min(), u.max(), num_points)
-    x_new, y_new = splev(u_new, tck)
-    # 闭合光滑后的多边形
-    x_new = np.append(x_new, x_new[0])
-    y_new = np.append(y_new, y_new[0])
-    return x_new, y_new
+# ==================== ★ 3. 核心矩阵计算逻辑分支 ★ ====================
+print(f"当前设置的计算类型为: '{ORE_CALC_TYPE}'")
+if ORE_CALC_TYPE == '':
+    # ---------------------------------------------------------
+    # 默认逻辑：严格保持与 four.m / untitled2.m 一致的计算逻辑
+    # ---------------------------------------------------------
+    print("--> 正在执行默认矩阵计算 (确保与 untitled2.m 逻辑完全一致)...")
 
+    # 【请在此处填入 untitled2.m 里的具体数学运算代码】
+    # 示例: Au_deep = Au_deep * 1.0
 
-def get_top_convex_hull(lon_arr, lat_arr, transformer, smooth_num=TOP_AREA_SMOOTH_POINTS):
-    """
-    生成包裹所有Top点位的凸包多边形，并做光滑处理
-    :param lon_arr: Top点位经度数组
-    :param lat_arr: Top点位纬度数组
-    :param transformer: 经纬度转UTM的转换器
-    :param smooth_num: 光滑后顶点数
-    :return: 光滑后的UTM凸包坐标(x,y)、经纬度凸包坐标(lon,lat)
-    """
-    # 转换为UTM坐标（平面坐标才能计算凸包和插值）
-    utm_x, utm_y = transformer.transform(lon_arr, lat_arr)
-    points_utm = np.column_stack((utm_x, utm_y))
-    # 计算凸包
-    hull = ConvexHull(points_utm)
-    # 获取凸包顶点的UTM坐标并闭合
-    hull_utm_x = points_utm[hull.vertices, 0]
-    hull_utm_y = points_utm[hull.vertices, 1]
-    hull_utm_x = np.append(hull_utm_x, hull_utm_x[0])
-    hull_utm_y = np.append(hull_utm_y, hull_utm_y[0])
-    # 对凸包边界做样条光滑处理（核心！）
-    hull_utm_x_smooth, hull_utm_y_smooth = smooth_polygon(hull_utm_x, hull_utm_y, smooth_num)
-    # 转换回经纬度（用于KMZ）
-    hull_lon_smooth, hull_lat_smooth = transformer.transform(hull_utm_x_smooth, hull_utm_y_smooth, direction='INVERSE')
-    return (hull_utm_x_smooth, hull_utm_y_smooth), (hull_lon_smooth, hull_lat_smooth)
+else:
+    # ---------------------------------------------------------
+    # 自定义逻辑：当输入了特定的矿体类型时，执行你专属的逻辑
+    # ---------------------------------------------------------
+    print(f"--> 检测到特定矿体 '{ORE_CALC_TYPE}'，正在执行专属矩阵运算...")
 
+    if ORE_CALC_TYPE.lower() == 'petroleum':
+        print("--> 匹配为: 石油 (Petroleum) 专属计算逻辑")
+        # 【请在此处填入针对该矿体的专属计算代码】
+        # 示例: Au_deep = np.power(Au_deep, 2)
 
-# ==================== 3. 坐标转换 (全局) ====================
+    elif ORE_CALC_TYPE == 'Au_vein':
+        print("--> 匹配为: 金矿脉专属逻辑")
+        # 示例: Au_deep = np.log1p(Au_deep)
+
+    else:
+        print(f"--> 匹配为: '{ORE_CALC_TYPE}' 通用专属逻辑")
+        pass
+
+# ==================== 4. 动态矿种/资源色彩体系配置 ====================
+RESOURCE_STYLES = {
+    'gold': {
+        'cmap': 'jet',
+        'key_line_color': 'red',
+        'top_fill': 'purple',
+        'top_point': 'red',
+        'top_edge': 'yellow'
+    },
+    'copper': {
+        'cmap': 'magma',
+        'key_line_color': '#00FFFF',
+        'top_fill': '#2E8B57',
+        'top_point': '#FF8C00',
+        'top_edge': 'white'
+    },
+    'petroleum': {
+        'cmap': 'bone_r',
+        'key_line_color': '#FFD700',
+        'top_fill': '#DAA520',
+        'top_point': '#FFFFFF',
+        'top_edge': '#FFD700'
+    },
+    'gas': {
+        'cmap': 'GnBu',
+        'key_line_color': '#FF1493',
+        'top_fill': '#00BFFF',
+        'top_point': '#0000FF',
+        'top_edge': 'white'
+    },
+    'other': {
+        'cmap': 'viridis',
+        'key_line_color': '#FF00FF',
+        'top_fill': '#8A2BE2',
+        'top_point': '#FFFFFF',
+        'top_edge': '#FF0000'
+    }
+}
+
+current_style = RESOURCE_STYLES.get(mineral_type, RESOURCE_STYLES['other'])
+COLOR_THEME = current_style['cmap']
+KEY_LINE_COLOR = current_style['key_line_color']
+TOP_FILL_COLOR = current_style['top_fill']
+TOP_POINT_COLOR = current_style['top_point']
+TOP_EDGE_COLOR = current_style['top_edge']
+
+# ==================== 5. 坐标投影与 KDTree 空间索引 ====================
 avg_lon = np.mean(lonGrid)
 utm_zone = int((avg_lon + 180) / 6) + 1
 crs_utm = f'EPSG:326{utm_zone}'
 transformer_ll2utm = Transformer.from_crs("EPSG:4326", crs_utm, always_xy=True)
 transformer_utm2ll = Transformer.from_crs(crs_utm, "EPSG:4326", always_xy=True)
 
-# 转换网格
+n_points = min(10, len(lonTop)) if len(lonTop) > 0 else 0
+utm_x_Top, utm_y_Top = np.array([]), np.array([])
+if n_points > 0:
+    utm_x_Top, utm_y_Top = transformer_ll2utm.transform(lonTop[:n_points], latTop[:n_points])
+
 utm_x_grid, utm_y_grid = transformer_ll2utm.transform(lonGrid, latGrid)
+
+# 将处理后的 Au_deep 进行翻转以适应图像坐标系
 Au_deep_flip = np.flipud(Au_deep)
+utm_x_ROI, utm_y_ROI = (transformer_ll2utm.transform(lonROI, latROI) if has_roi and len(lonROI) > 0 else (None, None))
 
-# --- 提前转换 ROI 坐标 ---
-utm_x_ROI = None
-utm_y_ROI = None
-if has_roi:
-    utm_x_ROI, utm_y_ROI = transformer_ll2utm.transform(lonROI, latROI)
+# 构建 cKDTree (提升鼠标悬停时的拾取性能)
+points_grid = np.column_stack((utm_x_grid.ravel(), utm_y_grid.ravel()))
+kdtree = cKDTree(points_grid)
 
 
-# ==================== 4. 绘图函数（调用光滑后的凸包） ====================
+# ==================== 辅助函数：样条光滑 ====================
+def smooth_polygon(x, y, num_points=100):
+    x, y = x[:-1], y[:-1]
+    tck, u = splprep([x, y], k=3, per=True, s=0)
+    u_new = np.linspace(u.min(), u.max(), num_points)
+    x_new, y_new = splev(u_new, tck)
+    return np.append(x_new, x_new[0]), np.append(y_new, y_new[0])
+
+
+def get_top_convex_hull(lon_arr, lat_arr, transformer, smooth_num=TOP_AREA_SMOOTH_POINTS):
+    utm_x, utm_y = transformer.transform(lon_arr, lat_arr)
+    points_utm = np.column_stack((utm_x, utm_y))
+    hull = ConvexHull(points_utm)
+    hull_utm_x, hull_utm_y = points_utm[hull.vertices, 0], points_utm[hull.vertices, 1]
+    hull_utm_x, hull_utm_y = np.append(hull_utm_x, hull_utm_x[0]), np.append(hull_utm_y, hull_utm_y[0])
+    hull_utm_x_smooth, hull_utm_y_smooth = smooth_polygon(hull_utm_x, hull_utm_y, smooth_num)
+    hull_lon_smooth, hull_lat_smooth = transformer.transform(hull_utm_x_smooth, hull_utm_y_smooth, direction='INVERSE')
+    return (hull_utm_x_smooth, hull_utm_y_smooth), (hull_lon_smooth, hull_lat_smooth)
+
+
+# ==================== 6. 核心绘图函数 ====================
+auto_cmap = plt.get_cmap(COLOR_THEME)
+step_levels = np.linspace(BASE_THRESHOLD, 1.0, STEP_NUM + 1)
+
+
 def create_figure(transparent=False):
     fig, ax = plt.subplots(figsize=(14, 11), facecolor='none' if transparent else 'white')
 
-    # 1. 填充色 (热力图)
-    contourf = ax.contourf(utm_x_grid, utm_y_grid, Au_deep_flip, 80, cmap='jet', extend='both')
-    contourf.set_clim(BASE_THRESHOLD, 1.0)
+    # 1. 基础热力图填充
+    contour_plot = ax.contourf(utm_x_grid, utm_y_grid, Au_deep_flip, levels=step_levels, cmap=auto_cmap, extend='both',
+                               zorder=0)
 
-    # 2. 白色细网格线
-    levels = np.arange(BASE_THRESHOLD, 1.0 + LEVEL_STEP, LEVEL_STEP)
-    ax.contour(utm_x_grid, utm_y_grid, Au_deep_flip, levels, colors='white', linewidths=0.5)
+    # 2. 黑色精细等值线
+    ax.contour(utm_x_grid, utm_y_grid, Au_deep_flip, levels=step_levels, colors='black', linewidths=0.5, alpha=0.4,
+               zorder=1)
 
-    # 3. 红色粗线 (重点区域)
-    high_levels = np.arange(BASE_THRESHOLD, 1.0 + HIGH_LEVEL_STEP, HIGH_LEVEL_STEP)
-    cnt_high = ax.contour(utm_x_grid, utm_y_grid, Au_deep_flip, high_levels, colors='red', linewidths=2.0)
+    # 3. 重点高异常区线 (动态颜色)
+    ax.contour(utm_x_grid, utm_y_grid, Au_deep_flip, levels=[KEY_AREA_THRESHOLD], colors=KEY_LINE_COLOR, linewidths=2.5,
+               zorder=3)
 
-    # === 绘制 ROI 方框 ===
     if has_roi and utm_x_ROI is not None:
         ax.plot(utm_x_ROI, utm_y_ROI, 'k-', linewidth=3, zorder=5)
 
-    # 4. Top 整体光滑区域 + 点位
-    global n_points, utm_x_Top, utm_y_Top
+    # 4. 绘制 Top 点位及平滑覆盖区
     if n_points > 0:
-        # 计算光滑后的Top凸包区域
         hull_utm, _ = get_top_convex_hull(lonTop[:n_points], latTop[:n_points], transformer_ll2utm)
-        # 绘制Top光滑区域（紫色填充，zorder=9，在点位下方）
-        ax.fill(hull_utm[0], hull_utm[1], color='purple', alpha=TOP_AREA_FILL_ALPHA / 255, zorder=9)
-        # 绘制Top光滑区域边线（白色粗线）
+        ax.fill(hull_utm[0], hull_utm[1], color=TOP_FILL_COLOR, alpha=TOP_AREA_FILL_ALPHA / 255, zorder=8)
         ax.plot(hull_utm[0], hull_utm[1], color='white', linewidth=TOP_AREA_LINE_WIDTH, zorder=9)
-        # 绘制Top点位（红色，zorder=10，在区域上方）
-        ax.scatter(utm_x_Top, utm_y_Top, s=14 ** 2,
-                   facecolor='red', edgecolor='black', linewidth=2, zorder=10)
 
-    # 5. 重点点位（yellow+red）
-    if len(redIdx) > 0 and n_points > 0:
-        redIdx_py = redIdx - 1
-        # 过滤有效索引
-        redIdx_py = redIdx_py[redIdx_py < n_points]
-        ax.scatter(utm_x_Top[redIdx_py], utm_y_Top[redIdx_py], s=24 ** 2,
-                   facecolor='yellow', edgecolor='red', linewidth=3, zorder=11)
+        ax.scatter(utm_x_Top, utm_y_Top, s=8 ** 2, facecolor=TOP_POINT_COLOR, edgecolor='black', linewidth=1.0,
+                   zorder=10)
+
+        if len(redIdx) > 0:
+            redIdx_py = (redIdx - 1)[(redIdx - 1) < n_points]
+            ax.scatter(utm_x_Top[redIdx_py], utm_y_Top[redIdx_py], s=14 ** 2,
+                       facecolor=TOP_POINT_COLOR, edgecolor=TOP_EDGE_COLOR, linewidth=2.0, zorder=11)
 
     if transparent:
         ax.axis('off')
         ax.set_position([0, 0, 1, 1])
     else:
         ax.set_aspect('equal')
-        ax.set_title(f'2026 {mineral_type} 矿深部预测（UTM Zone {utm_zone}）', fontsize=20)
-        ax.set_xlabel(f'UTM X (m)', fontsize=16)
-        ax.set_ylabel(f'UTM Y (m)', fontsize=16)
-        cbar = fig.colorbar(contourf, ax=ax, location='bottom', shrink=0.8)
+        mineral_name = mineral_type.capitalize()
+        # 动态调整标题，显示当前逻辑
+        logic_title = "默认逻辑" if ORE_CALC_TYPE == '' else f"{ORE_CALC_TYPE} 专属逻辑"
+        ax.set_title(f'2026 {mineral_name} 资源深部预测 - 学术高级制图 ({logic_title})', fontsize=20, pad=15)
+        cbar = fig.colorbar(contour_plot, ax=ax, location='bottom', shrink=0.8,
+                            ticks=np.linspace(BASE_THRESHOLD, 1.0, 7))
         cbar.ax.tick_params(labelsize=12)
 
-    return fig, ax, cnt_high
+    return fig, ax
 
 
-# ==================== 5. 交互式显示 (信息框在右下角) ====================
+# ==================== 7. 交互式显示 ====================
 print("正在启动交互式窗口...")
-fig_interactive, ax_interactive, _ = create_figure(transparent=False)
+fig_interactive, ax_interactive = create_figure(transparent=False)
 
-# --- 鼠标悬停信息框 ---
 info_text = ax_interactive.text(
-    0.98, 0.02, '',
-    transform=ax_interactive.transAxes,
-    fontsize=12,
-    verticalalignment='bottom',
-    horizontalalignment='right',
-    bbox=dict(
-        boxstyle='round,pad=0.5',
-        facecolor='white',
-        alpha=0.95,
-        edgecolor='black',
-        linewidth=1.5
-    )
+    0.98, 0.02, '', transform=ax_interactive.transAxes, fontsize=12,
+    verticalalignment='bottom', horizontalalignment='right',
+    bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='black', linewidth=1.5)
 )
 info_text.set_visible(False)
 
 
+# 使用 cKDTree 高效查询最近点
 def get_value_at_xy(x, y):
-    """根据UTM坐标获取经纬度和置信度"""
     lon, lat = transformer_utm2ll.transform(x, y)
-    dx = utm_x_grid - x
-    dy = utm_y_grid - y
-    dist = np.sqrt(dx ** 2 + dy ** 2)
-    min_idx = np.unravel_index(np.argmin(dist), dist.shape)
-    value = Au_deep_flip[min_idx]
-    return lon, lat, round(value, 4)
+    dist, idx = kdtree.query([x, y])
+    min_idx = np.unravel_index(idx, Au_deep_flip.shape)
+    return lon, lat, round(Au_deep_flip[min_idx], 4)
 
 
 def on_hover(event):
-    """鼠标悬停显示置信度、坐标"""
     if event.inaxes == ax_interactive and event.xdata is not None:
         lon, lat, value = get_value_at_xy(event.xdata, event.ydata)
         info_text.set_text(
-            f'📍 UTM: ({event.xdata:.0f}, {event.ydata:.0f})\n'
-            f'🌍 经纬度: ({lon:.6f}, {lat:.6f})\n'
-            f'🎯 置信度: {value}'
-        )
+            f'UTM坐标: ({event.xdata:.0f}, {event.ydata:.0f})\n经纬度: ({lon:.6f}, {lat:.6f})\n预测值: {value}')
         info_text.set_visible(True)
     else:
         info_text.set_visible(False)
     fig_interactive.canvas.draw_idle()
 
 
-# 绑定鼠标悬停事件
 fig_interactive.canvas.mpl_connect('motion_notify_event', on_hover)
 plt.tight_layout()
 plt.show(block=True)
 
-# ==================== 6. 生成 KML/KMZ (同步光滑后的Top区域) ====================
-print("正在生成地图叠加文件 (KMZ)...")
+# ==================== 8. 生成 KMZ ====================
+print("正在生成地图叠加包 (KMZ)...")
+fig_kml, ax_kml = create_figure(transparent=True)
 
-# --- 1. 生成带 ROI 的透明图片 ---
-fig_kml, ax_kml, cnt_high = create_figure(transparent=True)
-img_filename = f"【{mineral_type}】预测图_含边界_步长{LEVEL_STEP}.png"
+# 动态后缀，防止文件覆盖
+logic_suffix = "Default" if ORE_CALC_TYPE == '' else ORE_CALC_TYPE
+img_filename = f"【{mineral_type.capitalize()}】预测图_学术高级版_{logic_suffix}.png"
 img_path = os.path.join(output_dir, img_filename)
 plt.savefig(img_path, dpi=300, transparent=True, bbox_inches='tight', pad_inches=0)
 plt.close(fig_kml)
 
-# --- 2. 写入 KML ---
 kml = simplekml.Kml()
-kml.document.name = f"{mineral_type}矿 - 深部预测 (步长{LEVEL_STEP} | 阈值{KEY_AREA_THRESHOLD})"
+kml.document.name = f"{mineral_type.capitalize()} 资源深部预测 - 学术标准"
 
-# 层1: 热力图
-ground = kml.newgroundoverlay(name="1. 成矿置信度热力图")
+# 底图层
+ground = kml.newgroundoverlay(name="预测图层")
 ground.icon.href = img_filename
-ground.latlonbox.north = np.max(latGrid)
-ground.latlonbox.south = np.min(latGrid)
-ground.latlonbox.east = np.max(lonGrid)
-ground.latlonbox.west = np.min(lonGrid)
-ground.color = 'CC000000'  # 80%不透明
+ground.latlonbox.north, ground.latlonbox.south = np.max(latGrid), np.min(latGrid)
+ground.latlonbox.east, ground.latlonbox.west = np.max(lonGrid), np.min(lonGrid)
+ground.color = 'CC000000'
 
-# 层2: 重点区域矢量 (红线)
-fol_zones = kml.newfolder(name=f"2. 重点成矿区 (≥{KEY_AREA_THRESHOLD} | 步长{HIGH_LEVEL_STEP})")
-for i, level in enumerate(cnt_high.levels):
-    if level >= KEY_AREA_THRESHOLD:
-        paths = cnt_high.allsegs[i]
+# 矢量层 (重点成矿区)
+fol_zones = kml.newfolder(name=f"高潜力区 (≥{KEY_AREA_THRESHOLD})")
+kmz_levels = [lvl for lvl in step_levels if lvl >= KEY_AREA_THRESHOLD]
+if kmz_levels:
+    cnt_kmz = ax_kml.contour(utm_x_grid, utm_y_grid, Au_deep_flip, levels=kmz_levels, alpha=0)
+    for i, level in enumerate(cnt_kmz.levels):
+        paths = cnt_kmz.allsegs[i]
+        color_ratio = (level - BASE_THRESHOLD) / (1.0 - BASE_THRESHOLD)
+        rgba = auto_cmap(max(0.0, min(1.0, color_ratio)))
+        r, g, b = int(rgba[0] * 255), int(rgba[1] * 255), int(rgba[2] * 255)
+        hex_color_kml = f"99{b:02X}{g:02X}{r:02X}"
         for path in paths:
             if len(path) > 2:
                 lons, lats = transformer_utm2ll.transform(path[:, 0], path[:, 1])
-                coords = list(zip(lons, lats))
-                pol = fol_zones.newpolygon(name=f"置信度 ≥ {level:.2f}", outerboundaryis=coords)
-                alpha = int(FILL_ALPHA_BASE + (level - BASE_THRESHOLD) * 100)
-                alpha = min(alpha, FILL_ALPHA_MAX)
-                pol.style.polystyle.color = simplekml.Color.changealphaint(alpha, FILL_COLOR)
-                pol.style.linestyle.color = LINE_COLOR
-                pol.style.linestyle.width = LINE_WIDTH
+                pol = fol_zones.newpolygon(name=f"预测梯度 ≥ {level:.2f}", outerboundaryis=list(zip(lons, lats)))
+                pol.style.polystyle.color = hex_color_kml
+                pol.style.linestyle.color = 'FFFFFFFF'
+                pol.style.linestyle.width = 1
 
-# 层0: ROI 边界
-if has_roi:
-    fol_roi = kml.newfolder(name="0. 预测区域边界 (ROI)")
+# ROI 边界层
+if has_roi and len(lonROI) > 0:
+    fol_roi = kml.newfolder(name="探测范围边界 (ROI)")
     roi_coords = list(zip(lonROI, latROI))
-    if roi_coords[0] != roi_coords[-1]:
-        roi_coords.append(roi_coords[0])
-    pol = fol_roi.newpolygon(name="预测范围", outerboundaryis=roi_coords)
-    pol.style.polystyle.color = simplekml.Color.changealphaint(0, simplekml.Color.white)
-    pol.style.linestyle.color = simplekml.Color.black
-    pol.style.linestyle.width = 5
+    if roi_coords[0] != roi_coords[-1]: roi_coords.append(roi_coords[0])
+    pol = fol_roi.newpolygon(name="ROI边界", outerboundaryis=roi_coords)
+    pol.style.polystyle.color = '00FFFFFF'
+    pol.style.linestyle.color = 'FF000000'
+    pol.style.linestyle.width = 4
 
-# 层3: Top 靶区（同步光滑后的紫色整体区域）
+# Top 点位层
 if n_points > 0:
-    fol_top = kml.newfolder(name="3. Top 靶区 (紫色光滑整体区域)")
-    # 计算光滑后的Top凸包经纬度坐标
-    _, hull_ll = get_top_convex_hull(lonTop[:n_points], latTop[:n_points], transformer_ll2utm)
-    top_area_coords = list(zip(hull_ll[0], hull_ll[1]))
-    # 创建Top光滑多边形区域
-    pol = fol_top.newpolygon(name=f"Top靶区光滑整体 (共{n_points}个点位)", outerboundaryis=top_area_coords)
-    # 设置紫色区域样式
-    pol.style.polystyle.color = simplekml.Color.changealphaint(TOP_AREA_FILL_ALPHA, TOP_AREA_FILL_COLOR)
-    pol.style.linestyle.color = TOP_AREA_LINE_COLOR
-    pol.style.linestyle.width = TOP_AREA_LINE_WIDTH
-
-    # 可选：保留Top点位中心点标记（便于定位单个点，可注释删除）
-    fol_top_points = fol_top.newfolder(name="Top点位中心点")
+    fol_top = kml.newfolder(name="Top 靶区核心点")
     for i in range(n_points):
-        pnt = fol_top_points.newpoint(name=f"Top_{i + 1}", coords=[(lonTop[i], latTop[i])])
-        pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/red-circle.png'
-        pnt.style.iconstyle.scale = 1.2
+        pnt = fol_top.newpoint(name=f"Target_{i + 1}", coords=[(lonTop[i], latTop[i])])
+        pnt.style.iconstyle.scale = 1.0 if (i + 1) in redIdx else 0.7
 
-# --- 保存 KMZ ---
-kmz_path = os.path.join(output_dir, f"【{mineral_type}矿】预测图_含边界_步长{LEVEL_STEP}_阈值{KEY_AREA_THRESHOLD}.kmz")
+kmz_path = os.path.join(output_dir, f"【{mineral_type.capitalize()}】预测图_学术高级版_{logic_suffix}.kmz")
 kml.savekmz(kmz_path)
 
-# ==================== 7. 输出完成信息 ====================
-print(f"\n所有文件生成完成！")
-print(f"当前配置：")
-print(f"基础阈值：{BASE_THRESHOLD} | 重点区域阈值：{KEY_AREA_THRESHOLD}")
-print(f"网格步长：{LEVEL_STEP} | 红线步长：{HIGH_LEVEL_STEP}")
-print(f"Top光滑区域：紫色填充 (透明度{TOP_AREA_FILL_ALPHA}) | 白色边线 (宽度{TOP_AREA_LINE_WIDTH})")
-print(f"边界光滑度：{TOP_AREA_SMOOTH_POINTS}个插值顶点（数值越大越光滑）")
-print(f"Top靶区：共{n_points}个点位，已生成光滑凸包整体区域")
-print(f"文件路径：")
-print(f"透明预测图：{img_path}")
-print(f"地图叠加包：{kmz_path}")
-print(f"可用Google Earth/奥维地图直接打开KMZ，Top紫色区域为光滑曲线边界！")
+print(f"处理完成！")
+print(f"当前资源样式：{mineral_type.capitalize()}")
+print(f"运算逻辑状态：{'默认 (untitled2.m同步)' if ORE_CALC_TYPE == '' else f'专属 ({ORE_CALC_TYPE})'}")
+print(f"数据源：{data_path}")
+print(f"输出目录：{output_dir}")
