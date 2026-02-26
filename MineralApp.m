@@ -370,7 +370,7 @@ classdef MineralApp < matlab.apps.AppBase
             app.MineralLabel.Layout.Row = 5; app.MineralLabel.Layout.Column = [1 2];
             
             app.MineralDropDown = uidropdown(lpLayout);
-            app.MineralDropDown.Items = {'gold', 'copper', 'iron', 'lead', 'zinc', 'coal', 'petroleum', 'gas', 'rare_earth', 'lithium'};
+            app.MineralDropDown.Items = {'gold', 'copper','cave', 'iron', 'lead', 'zinc', 'coal', 'petroleum', 'gas', 'rare_earth', 'lithium'};
             app.MineralDropDown.Value = 'gold';
             app.MineralDropDown.FontSize = 13;
             app.MineralDropDown.Layout.Row = 6; app.MineralDropDown.Layout.Column = [1 2];
