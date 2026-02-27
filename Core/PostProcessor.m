@@ -83,10 +83,18 @@ classdef PostProcessor
             Au_surface(valid_mask) = Au_filt(valid_mask);
             Au_surface = GeoUtils.mat2gray_roi(Au_surface, ctx.inROI);
             
-            % 融合权重
+            % ==============================================================
+            % 融合权重 - 拦截空掩码
+            if isempty(final_mask)
+                final_mask = zeros(size(Au_surface)); 
+            end
+            % ==============================================================
+            
             if ~isequal(size(final_mask), size(Au_surface))
                 final_mask = imresize(final_mask, size(Au_surface), 'nearest');
             end
+            
+            % 此时如果全0，就是乘以 (1 + 0*0.4) = 1，保持原基础值
             Au_surface(ctx.inROI) = Au_surface(ctx.inROI) .* (1 + final_mask(ctx.inROI) * 0.4);
             Au_surface(ctx.inROI & (isnan(Au_surface) | isinf(Au_surface))) = 0;
             
@@ -120,14 +128,14 @@ classdef PostProcessor
                 ctx.lonROI, ctx.latROI, lonTop, latTop, redIdx, ctx.mineral_type, outDir);
             
             % ==========================================
-            % [新增] 提取出 kmz_threshold 以供 Python 读取
+            % 提取出 kmz_threshold 以供 Python 读取
             kmz_threshold = 0.6; % 默认值
             if isprop(ctx, 'kmz_threshold') && ~isempty(ctx.kmz_threshold)
                 kmz_threshold = ctx.kmz_threshold;
             end
             % ==========================================
 
-            % 5. Save (增加 kmz_threshold 保存)
+            % 5. Save
             dataFile = fullfile(outDir, sprintf('%s_Result.mat', ctx.mineral_type));
             Au_deep(isnan(Au_deep)) = 0; F_abs(isnan(F_abs)) = 0; depth_map(isnan(depth_map)) = 0;
             f_res_MHz(isnan(f_res_MHz)) = 0; moran_local(isnan(moran_local)) = 0;

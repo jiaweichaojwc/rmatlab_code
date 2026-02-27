@@ -40,8 +40,8 @@ classdef MineralApp < matlab.apps.AppBase
         
         % Actions
         RunBtn               matlab.ui.control.Button
-        SaveAsBtn            matlab.ui.control.Button  % New
-        RenameBtn            matlab.ui.control.Button  % New
+        SaveAsBtn            matlab.ui.control.Button  
+        RenameBtn            matlab.ui.control.Button  
         
         StatusArea           matlab.ui.control.TextArea
         
@@ -63,7 +63,7 @@ classdef MineralApp < matlab.apps.AppBase
     properties (Access = private)
         % Internal Data
         Config struct
-        CurrentResultDir char = '' % 存储当前结果文件夹路径，供另存为/重命名使用
+        CurrentResultDir char = '' 
     end
 
     methods (Access = private)
@@ -73,7 +73,7 @@ classdef MineralApp < matlab.apps.AppBase
             timestamp = datestr(now, 'HH:MM:SS');
             newMsg = sprintf('[%s] %s', timestamp, msg);
             app.StatusArea.Value = [app.StatusArea.Value; {newMsg}];
-            fprintf('%s\n', newMsg); % Also print to command window
+            fprintf('%s\n', newMsg); 
             scroll(app.StatusArea, 'bottom');
             drawnow;
         end
@@ -104,19 +104,18 @@ classdef MineralApp < matlab.apps.AppBase
                 fullPath = fullfile(p, f);
                 app.KMZEdit.Value = fullPath;
                 app.KMZCheckBox.Value = true;
-                app.cbKnown.Value = true; % Auto check the detector
+                app.cbKnown.Value = true; 
                 app.log(sprintf('已选择 KML 文件: %s', f));
             end
         end
 
-        % Callback: Save Results As... (New)
+        % Callback: Save Results As... 
         function saveResultsAs(app, ~)
             if isempty(app.CurrentResultDir) || ~exist(app.CurrentResultDir, 'dir')
                 uialert(app.UIFigure, '当前没有可保存的结果，请先运行分析。', '提示');
                 return;
             end
             
-            % 选择目标文件夹
             destFolder = uigetdir(pwd, '选择另存为的目标文件夹');
             if destFolder == 0, return; end
             
@@ -134,7 +133,7 @@ classdef MineralApp < matlab.apps.AppBase
             end
         end
 
-        % Callback: Rename Result Folder (New)
+        % Callback: Rename Result Folder 
         function renameResult(app, ~)
             if isempty(app.CurrentResultDir) || ~exist(app.CurrentResultDir, 'dir')
                 uialert(app.UIFigure, '当前没有可重命名的结果，请先运行分析。', '提示');
@@ -143,7 +142,6 @@ classdef MineralApp < matlab.apps.AppBase
             
             [parentDir, currentName] = fileparts(app.CurrentResultDir);
             
-            % 弹出输入框
             prompt = {'请输入新的结果文件夹名称:'};
             dlgtitle = '重命名结果';
             dims = [1 50];
@@ -153,7 +151,6 @@ classdef MineralApp < matlab.apps.AppBase
             if isempty(answer), return; end
             newName = answer{1};
             
-            % 检查非法字符
             if regexp(newName, '[<>:"/\\|?*]')
                 uialert(app.UIFigure, '名称包含非法字符，请重试。', '错误');
                 return;
@@ -162,7 +159,7 @@ classdef MineralApp < matlab.apps.AppBase
             newPath = fullfile(parentDir, newName);
             
             if strcmp(newPath, app.CurrentResultDir)
-                return; % 名称没变
+                return; 
             end
             
             if exist(newPath, 'dir')
@@ -172,7 +169,7 @@ classdef MineralApp < matlab.apps.AppBase
             
             try
                 movefile(app.CurrentResultDir, newPath);
-                app.CurrentResultDir = newPath; % 更新内部记录
+                app.CurrentResultDir = newPath; 
                 app.log(sprintf('✅ 结果文件夹已重命名为: %s', newName));
                 uialert(app.UIFigure, '重命名成功！', '成功');
             catch ME
@@ -183,7 +180,6 @@ classdef MineralApp < matlab.apps.AppBase
 
         % Callback: Run Analysis
         function runAnalysis(app, ~)
-            % 1. Validation
             if isempty(app.DirEdit.Value) || isempty(app.ROIEdit.Value)
                 uialert(app.UIFigure, '请先选择数据文件夹和坐标文件！', '配置错误');
                 return;
@@ -196,28 +192,24 @@ classdef MineralApp < matlab.apps.AppBase
             
             app.log('=== 开始新的分析任务 ===');
             
-            % 清空旧图片
             app.ImageResonance.ImageSource = '';
             app.ImageFusion.ImageSource = '';
             app.ImagePrediction.ImageSource = '';
             app.ResultTabs.SelectedTab = app.TabLog; 
-            app.CurrentResultDir = ''; % 重置当前结果路径
+            app.CurrentResultDir = ''; 
             
             try
-                % 2. Build Config
                 cfg = struct();
                 cfg.mineral_type = app.MineralDropDown.Value;
                 cfg.region_type = ''; 
                 cfg.levashov_mode = true;
                 cfg.fusion_mode = true;
                 
-                % [新增] 读取界面配置的 KMZ 阈值
                 cfg.kmz_threshold = app.KMZThresholdEdit.Value;
                 
                 cfg.data_dir = app.DirEdit.Value;
                 cfg.roi_file = app.ROIEdit.Value;
                 
-                % KML Config
                 detectors_to_use = {};
                 if app.cbRedEdge.Value, detectors_to_use{end+1} = 'RedEdge'; end
                 if app.cbIntrinsic.Value, detectors_to_use{end+1} = 'Intrinsic'; end
@@ -234,32 +226,36 @@ classdef MineralApp < matlab.apps.AppBase
                     cfg.kmz_path = '';
                 end
                 
+                % ==============================================
+                % 无探测器时的日志提示
                 if isempty(detectors_to_use)
-                    error('请至少选择一个探测器！');
+                    app.log('提示：未选择任何附加异常探测器，将仅使用基础地表特征进行预测。');
                 end
+                % ==============================================
                 
-                % 3. Initialize Context
                 app.log('正在初始化数据上下文 (GeoDataContext)...');
                 dataCtx = GeoDataContext(cfg);
                 
-                % 4. Output Path Construction (支持自定义任务名)
+                % ==============================================
+                % 处理输出路径文件夹名称
                 if ~isempty(app.TaskNameEdit.Value)
-                    % 使用自定义名称
                     folder_name = app.TaskNameEdit.Value;
                     app.log(['使用自定义任务名称: ', folder_name]);
                 else
-                    % 使用默认时间戳名称
                     types_str = strjoin(detectors_to_use, '_');
+                    if isempty(types_str)
+                        types_str = 'BaseMode'; % 空白时采用基础名称兜底
+                    end
                     folder_name = [types_str, '_Result_', cfg.mineral_type, '_', datestr(now, 'yyyymmdd_HHMM')];
                 end
+                % ==============================================
                 
                 cfg.outDir = fullfile(dataCtx.data_dir, folder_name);
                 if ~exist(cfg.outDir, 'dir'), mkdir(cfg.outDir); end
                 
-                app.CurrentResultDir = cfg.outDir; % 记录下来供后续使用
+                app.CurrentResultDir = cfg.outDir; 
                 app.log(sprintf('结果输出路径: %s', cfg.outDir));
                 
-                % 5. Fusion Engine
                 app.log('初始化融合引擎...');
                 engine = FusionEngine();
                 
@@ -268,11 +264,9 @@ classdef MineralApp < matlab.apps.AppBase
                 if any(strcmp(detectors_to_use, 'SlowVars')), engine.addDetector('SlowVars', SlowVarsDetector()); end
                 if any(strcmp(detectors_to_use, 'KnownAnomaly')), engine.addDetector('KnownAnomaly', KnownAnomalyDetector()); end
                 
-                % 6. Compute
                 app.log('开始计算各异常层 (ComputeAll)...');
                 engine.computeAll(dataCtx);
                 
-                % 7. Fusion & PostProcess
                 app.log('执行结果融合与后处理...');
                 final_mask = engine.getFusedMask(detectors_to_use);
                 PostProcessor.run(dataCtx, engine, final_mask, cfg.outDir);
@@ -280,26 +274,21 @@ classdef MineralApp < matlab.apps.AppBase
                 app.log('✅ 所有流程完成！');
                 app.log(['结果已保存至: ', cfg.outDir]);
                 
-                % 8. Load Images
-                % (1) Resonance
                 img01 = fullfile(cfg.outDir, '01_共振参数综合图.png');
                 if exist(img01, 'file'), app.ImageResonance.ImageSource = img01; end
                 
-                % (2) Fusion
                 dir02 = dir(fullfile(cfg.outDir, '02_掩码集成_*.png'));
                 if ~isempty(dir02)
                     img02 = fullfile(dir02(1).folder, dir02(1).name);
                     app.ImageFusion.ImageSource = img02;
                 end
                 
-                % (3) Prediction
                 img03 = fullfile(cfg.outDir, '03_深部成矿预测图.png');
                 if exist(img03, 'file')
                     app.ImagePrediction.ImageSource = img03;
                     app.ResultTabs.SelectedTab = app.TabPrediction;
                 end
                 
-                % 启用后续操作按钮
                 app.SaveAsBtn.Enable = 'on';
                 app.RenameBtn.Enable = 'on';
                 
@@ -314,19 +303,15 @@ classdef MineralApp < matlab.apps.AppBase
         end
     end
 
-    % App initialization and layout
     methods (Access = public)
         function createComponents(app)
-            % Main Figure
             app.UIFigure = uifigure('Position', [100, 100, 1150, 720]); 
             app.UIFigure.Name = '舒曼波共振遥感 - 智能分析系统';
             
-            % Grid Layout
             app.GridLayout = uigridlayout(app.UIFigure);
-            app.GridLayout.ColumnWidth = {340, '1x'}; % 左侧面板加宽适应新按钮
+            app.GridLayout.ColumnWidth = {340, '1x'}; 
             app.GridLayout.RowHeight = {'1x'};
             
-            % --- Left Panel (Controls) ---
             app.LeftPanel = uipanel(app.GridLayout);
             app.LeftPanel.Layout.Row = 1;
             app.LeftPanel.Layout.Column = 1;
@@ -337,10 +322,8 @@ classdef MineralApp < matlab.apps.AppBase
             lpLayout = uigridlayout(app.LeftPanel);
             lpLayout.ColumnWidth = {'1x', 40};
             
-            % [修改] 增加行高，容纳置信度控件
             lpLayout.RowHeight = {22, 25, 22, 25, 22, 25, 22, 25, 220, 22, 25, 22, 25, 50, 40, '1x'};
             
-            % 1. Data Dir
             app.DirLabel = uilabel(lpLayout, 'Text', '1. Data 数据文件夹:');
             app.DirLabel.FontSize = 13;
             app.DirLabel.Layout.Row = 1; app.DirLabel.Layout.Column = [1 2];
@@ -352,7 +335,6 @@ classdef MineralApp < matlab.apps.AppBase
             app.DirBtn.Layout.Row = 2; app.DirBtn.Layout.Column = 2;
             app.DirBtn.ButtonPushedFcn = createCallbackFcn(app, @selectDataDir, true);
             
-            % 2. ROI File
             app.ROILabel = uilabel(lpLayout, 'Text', '2. 坐标文件 (.xlsx):');
             app.ROILabel.FontSize = 13;
             app.ROILabel.Layout.Row = 3; app.ROILabel.Layout.Column = [1 2];
@@ -364,7 +346,6 @@ classdef MineralApp < matlab.apps.AppBase
             app.ROIBtn.Layout.Row = 4; app.ROIBtn.Layout.Column = 2;
             app.ROIBtn.ButtonPushedFcn = createCallbackFcn(app, @selectROI, true);
             
-            % 3. Mineral Type
             app.MineralLabel = uilabel(lpLayout, 'Text', '3. 目标矿种:');
             app.MineralLabel.FontSize = 13;
             app.MineralLabel.Layout.Row = 5; app.MineralLabel.Layout.Column = [1 2];
@@ -375,7 +356,6 @@ classdef MineralApp < matlab.apps.AppBase
             app.MineralDropDown.FontSize = 13;
             app.MineralDropDown.Layout.Row = 6; app.MineralDropDown.Layout.Column = [1 2];
             
-            % 4. KML Config
             app.KMZCheckBox = uicheckbox(lpLayout, 'Text', '导入 KML/KMZ 已知异常');
             app.KMZCheckBox.FontSize = 13;
             app.KMZCheckBox.Layout.Row = 7; app.KMZCheckBox.Layout.Column = [1 2];
@@ -388,7 +368,6 @@ classdef MineralApp < matlab.apps.AppBase
             app.KMZBtn.Layout.Row = 8; app.KMZBtn.Layout.Column = 2;
             app.KMZBtn.ButtonPushedFcn = createCallbackFcn(app, @selectKML, true);
             
-            % 5. Detectors Panel
             app.DetectorPanel = uipanel(lpLayout, 'Title', '启用的探测器 (多选)');
             app.DetectorPanel.Layout.Row = 9; app.DetectorPanel.Layout.Column = [1 2];
             app.DetectorPanel.FontSize = 14; 
@@ -407,33 +386,29 @@ classdef MineralApp < matlab.apps.AppBase
             app.cbKnown = uicheckbox(dpLayout, 'Text', 'KnownAnomaly (KML)', 'Value', false, 'FontSize', 14, 'FontWeight', 'bold');
             app.cbKnown.Layout.Row = 4;
             
-            % 6. KMZ 导出置信度阈值 (New)
             app.KMZThresholdLabel = uilabel(lpLayout, 'Text', '4. 生成KMZ置信度 (0~1):');
             app.KMZThresholdLabel.FontSize = 13;
             app.KMZThresholdLabel.Layout.Row = 10; app.KMZThresholdLabel.Layout.Column = [1 2];
             
             app.KMZThresholdEdit = uieditfield(lpLayout, 'numeric');
             app.KMZThresholdEdit.Limits = [0.1 1.0];
-            app.KMZThresholdEdit.Value = 0.6; % 默认值0.6
+            app.KMZThresholdEdit.Value = 0.6; 
             app.KMZThresholdEdit.Layout.Row = 11; app.KMZThresholdEdit.Layout.Column = [1 2];
             
-            % 7. Task Name
             app.TaskNameLabel = uilabel(lpLayout, 'Text', '5. 任务名称 (可选，留空则自动命名):');
             app.TaskNameLabel.FontSize = 13;
-            app.TaskNameLabel.FontColor = [0.4 0.4 0.4]; % 灰色提示
+            app.TaskNameLabel.FontColor = [0.4 0.4 0.4]; 
             app.TaskNameLabel.Layout.Row = 12; app.TaskNameLabel.Layout.Column = [1 2];
             
             app.TaskNameEdit = uieditfield(lpLayout);
             app.TaskNameEdit.Placeholder = '例如: 新疆金矿_测试01';
             app.TaskNameEdit.Layout.Row = 13; app.TaskNameEdit.Layout.Column = [1 2];
             
-            % 8. Run Button
             app.RunBtn = uibutton(lpLayout, 'Text', '开始运行分析', ...
                 'BackgroundColor', [0.2, 0.6, 0.2], 'FontColor', 'w', 'FontWeight', 'bold', 'FontSize', 16);
             app.RunBtn.Layout.Row = 14; app.RunBtn.Layout.Column = [1 2];
             app.RunBtn.ButtonPushedFcn = createCallbackFcn(app, @runAnalysis, true);
             
-            % 9. Action Buttons (Grid inside Grid for side-by-side buttons)
             actionGrid = uigridlayout(lpLayout, 'RowHeight', {'1x'}, 'ColumnWidth', {'1x', '1x'});
             actionGrid.Layout.Row = 15; actionGrid.Layout.Column = [1 2];
             actionGrid.Padding = [0 0 0 0];
@@ -444,7 +419,6 @@ classdef MineralApp < matlab.apps.AppBase
             app.RenameBtn = uibutton(actionGrid, 'Text', '重命名结果', 'Enable', 'off');
             app.RenameBtn.ButtonPushedFcn = createCallbackFcn(app, @renameResult, true);
             
-            % --- Right Panel (Visualization & Logs) ---
             app.RightPanel = uipanel(app.GridLayout);
             app.RightPanel.Layout.Row = 1;
             app.RightPanel.Layout.Column = 2;
@@ -452,11 +426,9 @@ classdef MineralApp < matlab.apps.AppBase
             
             rpLayout = uigridlayout(app.RightPanel, 'RowHeight', {'1x'}, 'ColumnWidth', {'1x'});
             
-            % Create Tab Group
             app.ResultTabs = uitabgroup(rpLayout);
             app.ResultTabs.Layout.Row = 1; app.ResultTabs.Layout.Column = 1;
             
-            % Tab 1: 运行日志
             app.TabLog = uitab(app.ResultTabs, 'Title', '运行日志');
             logLayout = uigridlayout(app.TabLog, 'ColumnWidth', {'1x'}, 'RowHeight', {'1x'});
             app.StatusArea = uitextarea(logLayout, 'Editable', false);
@@ -464,21 +436,18 @@ classdef MineralApp < matlab.apps.AppBase
             app.StatusArea.Layout.Row = 1; app.StatusArea.Layout.Column = 1;
             app.StatusArea.Value = {'=== 系统就绪，请配置参数 ==='};
             
-            % Tab 2: 共振参数
             app.TabResonance = uitab(app.ResultTabs, 'Title', '1. 共振参数');
             resLayout = uigridlayout(app.TabResonance, 'ColumnWidth', {'1x'}, 'RowHeight', {'1x'});
             app.ImageResonance = uiimage(resLayout);
             app.ImageResonance.ScaleMethod = 'fit';
             app.ImageResonance.Layout.Row = 1; app.ImageResonance.Layout.Column = 1;
             
-            % Tab 3: 掩码集成
             app.TabFusion = uitab(app.ResultTabs, 'Title', '2. 掩码集成');
             fusLayout = uigridlayout(app.TabFusion, 'ColumnWidth', {'1x'}, 'RowHeight', {'1x'});
             app.ImageFusion = uiimage(fusLayout);
             app.ImageFusion.ScaleMethod = 'fit';
             app.ImageFusion.Layout.Row = 1; app.ImageFusion.Layout.Column = 1;
             
-            % Tab 4: 深部预测
             app.TabPrediction = uitab(app.ResultTabs, 'Title', '3. 深部预测');
             predLayout = uigridlayout(app.TabPrediction, 'ColumnWidth', {'1x'}, 'RowHeight', {'1x'});
             app.ImagePrediction = uiimage(predLayout);
