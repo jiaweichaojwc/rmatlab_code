@@ -32,13 +32,16 @@ class ComputeThread(QThread):
             self.log_signal.emit(f"目标矿种: {self.params['mineral_type']}")
             self.log_signal.emit("正在执行多源特征提取与融合 (这可能需要几分钟，请耐心等待)...")
 
-            # 1. 调用 MATLAB 核心引擎
+            # 【核心修改】：在这里接收并传入 8 个参数！真实控制底层计算
             mat_file_path = engine.run_core_algorithm(
                 self.params['data_dir'],
                 self.params['roi_file'],
                 self.params['mineral_type'],
                 self.params['kmz_path'],
-                self.params['kmz_threshold']
+                self.params['kmz_threshold'],
+                bool(self.params['use_red']),
+                bool(self.params['use_int']),
+                bool(self.params['use_slow'])
             )
             self.log_signal.emit(f"✅ 底层计算完成！特征矩阵已保存在: {mat_file_path}")
             engine.terminate()
@@ -70,7 +73,7 @@ class ComputeThread(QThread):
 class MineralApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("舒曼波共振遥感 - 智能分析系统 (纯血 Python 版)")
+        self.setWindowTitle("舒曼波共振遥感 - 智能分析系统 (纯血控制版)")
         self.resize(1150, 720)
 
         self.current_out_dir = ""
@@ -243,12 +246,16 @@ class MineralApp(QMainWindow):
         # 准备传给后台的参数
         kmz_path = self.kmz_edit.text() if self.kmz_checkbox.isChecked() else ""
 
+        # 【核心修改】：把复选框的勾选状态抓取进 params 字典
         params = {
             'data_dir': self.dir_edit.text(),
             'roi_file': self.roi_edit.text(),
             'mineral_type': self.mineral_combo.currentText(),
             'kmz_path': kmz_path,
-            'kmz_threshold': self.kmz_threshold.value()
+            'kmz_threshold': self.kmz_threshold.value(),
+            'use_red': self.cb_rededge.isChecked(),
+            'use_int': self.cb_intrinsic.isChecked(),
+            'use_slow': self.cb_slowvars.isChecked()
         }
 
         # 启动后台线程
