@@ -2,20 +2,141 @@ import streamlit as st
 import os
 import sys
 import subprocess
+import sqlite3
+import hashlib
 
+# 必须放在第一行
 st.set_page_config(page_title="舒曼波共振遥感预测系统", layout="wide")
 
-try:
-    import mineral_core
-except ImportError:
-    st.error("⚠️ 未检测到 mineral_core 引擎，请确认是否已在当前环境中安装 setup.py！")
+
+# ==========================================
+# 数据库与加密辅助函数
+# ==========================================
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
 
 
-def main():
-    st.title("🌍 舒曼波共振遥感 - 智能分析系统 (纯血控制版)")
+def check_hashes(password, hashed_text):
+    if make_hashes(password) == hashed_text:
+        return hashed_text
+    return False
+
+
+def init_db():
+    """初始化数据库并注入超级管理员账号"""
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT)')
+    conn.commit()
+
+    # 检查是否存在 admin 账号，如果没有则自动创建 (默认密码 admin888)
+    c.execute('SELECT * FROM users WHERE username="admin"')
+    if not c.fetchone():
+        c.execute('INSERT INTO users(username, password) VALUES (?,?)', ('admin', make_hashes('admin888')))
+        conn.commit()
+    conn.close()
+
+
+def add_user(username, password):
+    """(管理员专用) 向数据库添加新用户"""
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    try:
+        c.execute('INSERT INTO users(username, password) VALUES (?,?)', (username, password))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False  # 用户名已存在
+    finally:
+        conn.close()
+
+
+def get_all_users():
+    """(管理员专用) 获取所有普通账号列表"""
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('SELECT username FROM users WHERE username != "admin"')
+    data = c.fetchall()
+    conn.close()
+    return [row[0] for row in data]
+
+
+def delete_user(username):
+    """(管理员专用) 删除账号"""
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('DELETE FROM users WHERE username=?', (username,))
+    conn.commit()
+    conn.close()
+
+
+def login_user(username, password):
+    """验证用户名和密码"""
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('SELECT * FROM users WHERE username =? AND password = ?', (username, password))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+
+# ==========================================
+# 核心业务逻辑 (带权限隔离)
+# ==========================================
+def run_main_app():
+    try:
+        import mineral_core
+    except ImportError:
+        st.error("⚠️ 未检测到 mineral_core 引擎，请确认是否已在当前环境中安装 setup.py！")
+        return
+
+    st.title("🌍 舒曼波共振遥感 - 智能分析系统")
     st.markdown("---")
 
     with st.sidebar:
+        # ====== 身份展示与退出 ======
+        current_user = st.session_state['username']
+        if current_user == "admin":
+            st.success("👑 欢迎回来, **超级管理员 (Admin)**")
+        else:
+            st.success(f"👋 欢迎回来, **{current_user}**")
+
+        if st.button("🚪 退出登录"):
+            st.session_state['logged_in'] = False
+            st.rerun()
+
+        # ====== 管理员专属控制台 ======
+        if current_user == "admin":
+            st.markdown("---")
+            with st.expander("🛠️ 管理员控制台 (账号分配)", expanded=False):
+                st.markdown("**➕ 创建新账号**")
+                new_user = st.text_input("分配用户名", key="new_user_input")
+                new_pwd = st.text_input("分配初始密码", key="new_pwd_input")
+                if st.button("生成账号"):
+                    if new_user and new_pwd:
+                        if new_user == "admin":
+                            st.error("不能占用 admin 名称！")
+                        elif add_user(new_user, make_hashes(new_pwd)):
+                            st.success(f"已成功为 【{new_user}】 开通访问权限！")
+                        else:
+                            st.error("该用户名已存在！")
+                    else:
+                        st.warning("用户名和密码不能为空")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("**🗑️ 账号管理**")
+                users_list = get_all_users()
+                if users_list:
+                    user_to_delete = st.selectbox("选择要注销的账号", [""] + users_list)
+                    if st.button("注销该账号") and user_to_delete:
+                        delete_user(user_to_delete)
+                        st.success(f"已注销账号: {user_to_delete}")
+                        st.rerun()
+                else:
+                    st.info("当前暂无其他普通账号")
+
+        # ====== 遥感算法参数配置 (全员可见) ======
+        st.markdown("---")
         st.header("⚙️ 参数配置")
 
         data_dir = st.text_input("1. Data 数据文件夹:",
@@ -28,7 +149,6 @@ def main():
 
         st.markdown("---")
         st.markdown("**📌 启用的探测器 (自由控制):**")
-        # 自由勾选，且变量会被记录下来传给 MATLAB
         use_red = st.checkbox("RedEdge (红边)", value=True)
         use_int = st.checkbox("Intrinsic (本征吸收)", value=True)
         use_slow = st.checkbox("SlowVars (慢变量)", value=False)
@@ -38,11 +158,11 @@ def main():
         st.checkbox("KnownAnomaly (KML 异常)", value=bool(kmz_path), disabled=True)
 
         kmz_threshold = st.slider("5. 生成 KMZ 置信度 (0~1):", min_value=0.1, max_value=1.0, value=0.6, step=0.05)
-        task_name = st.text_input("6. 任务名称 (可选):", placeholder="例如: 新疆金矿_测试01")
 
         st.markdown("<br>", unsafe_allow_html=True)
         start_btn = st.button("🚀 开始运行分析", use_container_width=True, type="primary")
 
+    # ====== 核心绘图与运行逻辑 ======
     tab_log, tab_resonance, tab_fusion, tab_prediction = st.tabs([
         "📝 运行日志", "📊 1. 共振参数", "🧩 2. 掩码集成", "🎯 3. 深部预测"
     ])
@@ -61,20 +181,12 @@ def main():
 
         try:
             engine = mineral_core.initialize()
-
             with tab_log:
                 status_box.warning("🧠 正在执行多源特征提取与融合 (这可能需要几分钟，请耐心等待)...")
 
-            # 【核心】：真正地把你的勾选状态（True/False）传给 MATLAB！
             mat_file_path = engine.run_core_algorithm(
-                data_dir,
-                roi_file,
-                mineral_type,
-                kmz_path,
-                kmz_threshold,
-                bool(use_red),
-                bool(use_int),
-                bool(use_slow)
+                data_dir, roi_file, mineral_type, kmz_path, kmz_threshold,
+                bool(use_red), bool(use_int), bool(use_slow)
             )
 
             with tab_log:
@@ -131,5 +243,39 @@ def main():
                 pass
 
 
-if __name__ == "__main__":
+# ==========================================
+# 仅保留登录的独立访问入口
+# ==========================================
+def main():
+    init_db()  # 初始化数据库并注入 admin
+
+    if 'logged_in' not in st.session_state:
+        st.session_state['logged_in'] = False
+
+    if st.session_state['logged_in']:
+        run_main_app()
+    else:
+        st.markdown("<h1 style='text-align: center;'>🔐 舒曼波共振遥感预测系统</h1>", unsafe_allow_html=True)
+        st.markdown("<h4 style='text-align: center; color: gray;'>内部授权访问控制台</h4>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        col1, col2, col3 = st.columns([1, 1.5, 1])
+        with col2:
+            st.info("💡 本系统为内部私有部署，不对外开放注册。请使用管理员分配的账号登录。")
+            username = st.text_input("👤 用户名")
+            password = st.text_input("🔑 密码", type='password')
+
+            if st.button("安全登录", type="primary", use_container_width=True):
+                hashed_pswd = make_hashes(password)
+                result = login_user(username, check_hashes(password, hashed_pswd))
+
+                if result:
+                    st.session_state['logged_in'] = True
+                    st.session_state['username'] = username
+                    st.rerun()
+                else:
+                    st.error("❌ 用户名或密码错误，或账号尚未开通！")
+
+
+if __name__ == '__main__':
     main()
