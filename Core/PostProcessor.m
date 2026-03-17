@@ -1,7 +1,7 @@
 classdef PostProcessor
     methods (Static)
         function run(ctx, engine, final_mask, outDir)
-            fprintf('=== 进入后处理阶段 (多掩码增强版) ===\n');
+            fprintf('=== 进入后处理阶段 (多掩码增强版 - 边缘效应修复) ===\n');
             
             function res = safeGet(name)
                 if engine.results.isKey(name)
@@ -77,18 +77,27 @@ classdef PostProcessor
                 Au_surface = enh_func(Ferric, Fe_anomaly, Hydroxy_anomaly, Clay, NDVI_inv);
             end
 
-            % Filter 1
-            valid_mask = ctx.inROI & ~isnan(Au_surface); Au_temp = Au_surface; Au_temp(~valid_mask) = 0;
+            % ==============================================================
+            % 【修复点 1】: Filter 1 - 使用归一化高斯滤波消除边缘拉扯
+            % ==============================================================
+            valid_mask = ctx.inROI & ~isnan(Au_surface); 
+            Au_temp = Au_surface; Au_temp(~valid_mask) = 0;
+            
+            % 分别对数据和掩码进行平滑
             Au_filt = imgaussfilt(Au_temp, 8, 'Padding', 'replicate');
-            Au_surface(valid_mask) = Au_filt(valid_mask);
+            W_filt = imgaussfilt(double(valid_mask), 8, 'Padding', 'replicate');
+            W_filt(W_filt == 0) = eps; % 防止除以0
+            
+            % 归一化除法纠正边缘
+            Au_surface(valid_mask) = Au_filt(valid_mask) ./ W_filt(valid_mask);
             Au_surface = GeoUtils.mat2gray_roi(Au_surface, ctx.inROI);
             
             % ==============================================================
             % 融合权重 - 拦截空掩码
+            % ==============================================================
             if isempty(final_mask)
                 final_mask = zeros(size(Au_surface)); 
             end
-            % ==============================================================
             
             if ~isequal(size(final_mask), size(Au_surface))
                 final_mask = imresize(final_mask, size(Au_surface), 'nearest');
@@ -98,14 +107,23 @@ classdef PostProcessor
             Au_surface(ctx.inROI) = Au_surface(ctx.inROI) .* (1 + final_mask(ctx.inROI) * 0.4);
             Au_surface(ctx.inROI & (isnan(Au_surface) | isinf(Au_surface))) = 0;
             
-            % Filter 2
-            valid_mask = ctx.inROI & ~isnan(Au_surface); Au_temp = Au_surface; Au_temp(~valid_mask) = 0;
+            % ==============================================================
+            % 【修复点 2】: Filter 2 - 同样使用归一化高斯滤波
+            % ==============================================================
+            valid_mask = ctx.inROI & ~isnan(Au_surface); 
+            Au_temp = Au_surface; Au_temp(~valid_mask) = 0;
+            
             Au_filt = imgaussfilt(Au_temp, 6, 'Padding', 'replicate');
-            Au_surface(valid_mask) = Au_filt(valid_mask);
+            W_filt = imgaussfilt(double(valid_mask), 6, 'Padding', 'replicate');
+            W_filt(W_filt == 0) = eps;
+            
+            Au_surface(valid_mask) = Au_filt(valid_mask) ./ W_filt(valid_mask);
             Au_deep = GeoUtils.mat2gray_roi(Au_surface, ctx.inROI);
 
             % 3. Top 20
-            temp = Au_deep; temp(~ctx.inROI) = 0;
+            temp = Au_deep; 
+            temp(~ctx.inROI) = 0; 
+            temp(isnan(temp)) = 0; % 确保排序时无 NaN
             [~, idx] = sort(temp(:), 'descend'); top20 = idx(1:min(20, length(idx)));
             [topY, topX] = ind2sub([H, W], top20);
             latGrid_corrected = flipud(ctx.latGrid);
@@ -127,18 +145,22 @@ classdef PostProcessor
             Visualizer.run_deep_prediction(Au_deep, ctx.lonGrid, ctx.latGrid, ...
                 ctx.lonROI, ctx.latROI, lonTop, latTop, redIdx, ctx.mineral_type, outDir);
             
-            % ==========================================
             % 提取出 kmz_threshold 以供 Python 读取
             kmz_threshold = 0.6; % 默认值
             if isprop(ctx, 'kmz_threshold') && ~isempty(ctx.kmz_threshold)
                 kmz_threshold = ctx.kmz_threshold;
             end
-            % ==========================================
 
-            % 5. Save
+            % ==============================================================
+            % 【修复点 3】: 保存时，不要将外部置为 0，保留 NaN 空白状态
+            % 这样绘图引擎画等值线时就会在边界自然中止，而不会产生陡降的密集线条。
+            % ==============================================================
             dataFile = fullfile(outDir, sprintf('%s_Result.mat', ctx.mineral_type));
-            Au_deep(isnan(Au_deep)) = 0; F_abs(isnan(F_abs)) = 0; depth_map(isnan(depth_map)) = 0;
-            f_res_MHz(isnan(f_res_MHz)) = 0; moran_local(isnan(moran_local)) = 0;
+            % Au_deep(isnan(Au_deep)) = 0; <-- 删除了这句！保留 NaN
+            F_abs(isnan(F_abs)) = 0; 
+            depth_map(isnan(depth_map)) = 0;
+            f_res_MHz(isnan(f_res_MHz)) = 0; 
+            moran_local(isnan(moran_local)) = 0;
             
             final_anomaly_mask = final_mask; inROI = ctx.inROI;
             lonGrid = ctx.lonGrid; latGrid = ctx.latGrid; lonROI = ctx.lonROI; latROI = ctx.latROI;
