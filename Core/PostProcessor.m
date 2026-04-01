@@ -118,7 +118,8 @@ classdef PostProcessor
             W_filt(W_filt == 0) = eps;
             
             Au_surface(valid_mask) = Au_filt(valid_mask) ./ W_filt(valid_mask);
-            Au_deep = GeoUtils.mat2gray_roi(Au_surface, ctx.inROI);
+            Au_deep = GeoUtils.mat2gray_roi(anomaly_mask_fabs, ctx.inROI);
+            Au_deep(~ctx.inROI) = NaN; % 保证边缘空白
 
             % 3. Top 20
             temp = Au_deep; 
