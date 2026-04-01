@@ -46,8 +46,8 @@ classdef FusionEngine < handle
                     if ~isequal(size(fusedMask), size(currentMask))
                         currentMask = imresize(currentMask, size(fusedMask), 'nearest');
                     end
-                    % OR 逻辑融合
-                    fusedMask = fusedMask | currentMask;
+                    % 【核心修复】：兼容连续梯度的取最大值融合，抛弃二值化的 OR 逻辑
+                    fusedMask = max(fusedMask, currentMask);
                 end
             end
             fusedMask = double(fusedMask);

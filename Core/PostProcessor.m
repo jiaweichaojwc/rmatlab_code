@@ -1,7 +1,7 @@
 classdef PostProcessor
     methods (Static)
         function run(ctx, engine, final_mask, outDir)
-            fprintf('=== 进入后处理阶段 (多掩码增强版 - 边缘效应修复) ===\n');
+            fprintf('=== 进入后处理阶段 (多模式智能融合版) ===\n');
             
             function res = safeGet(name)
                 if engine.results.isKey(name)
@@ -92,9 +92,7 @@ classdef PostProcessor
             Au_surface(valid_mask) = Au_filt(valid_mask) ./ W_filt(valid_mask);
             Au_surface = GeoUtils.mat2gray_roi(Au_surface, ctx.inROI);
             
-            % ==============================================================
-            % 融合权重 - 拦截空掩码
-            % ==============================================================
+            % 拦截空掩码
             if isempty(final_mask)
                 final_mask = zeros(size(Au_surface)); 
             end
@@ -103,23 +101,36 @@ classdef PostProcessor
                 final_mask = imresize(final_mask, size(Au_surface), 'nearest');
             end
             
-            % 此时如果全0，就是乘以 (1 + 0*0.4) = 1，保持原基础值
-            Au_surface(ctx.inROI) = Au_surface(ctx.inROI) .* (1 + final_mask(ctx.inROI) * 0.4);
-            Au_surface(ctx.inROI & (isnan(Au_surface) | isinf(Au_surface))) = 0;
-            
             % ==============================================================
-            % 【修复点 2】: Filter 2 - 同样使用归一化高斯滤波
+            % 【核心修改点】：根据开关决定是否融合地表通用背景
             % ==============================================================
-            valid_mask = ctx.inROI & ~isnan(Au_surface); 
-            Au_temp = Au_surface; Au_temp(~valid_mask) = 0;
-            
-            Au_filt = imgaussfilt(Au_temp, 6, 'Padding', 'replicate');
-            W_filt = imgaussfilt(double(valid_mask), 6, 'Padding', 'replicate');
-            W_filt(W_filt == 0) = eps;
-            
-            Au_surface(valid_mask) = Au_filt(valid_mask) ./ W_filt(valid_mask);
-            Au_deep = GeoUtils.mat2gray_roi(anomaly_mask_fabs, ctx.inROI);
-            Au_deep(~ctx.inROI) = NaN; % 保证边缘空白
+            if isprop(ctx, 'fusion_mode') && ~ctx.fusion_mode
+                % --- [未勾选] 纯净模式 ---
+                fprintf('  -> [纯净模式] 跳过地表背景，直接输出探测器等值线。\n');
+                Au_deep = GeoUtils.mat2gray_roi(final_mask, ctx.inROI);
+                Au_deep(~ctx.inROI) = NaN;
+                
+            else
+                % --- [已勾选] 综合融合模式 ---
+                fprintf('  -> [融合模式] 正在叠加地表通用背景 (Au_surface)...\n');
+                
+                % 乘以权重
+                Au_surface(ctx.inROI) = Au_surface(ctx.inROI) .* (1 + final_mask(ctx.inROI) * 0.4);
+                Au_surface(ctx.inROI & (isnan(Au_surface) | isinf(Au_surface))) = 0;
+                
+                % Filter 2 - 归一化高斯滤波
+                valid_mask = ctx.inROI & ~isnan(Au_surface); 
+                Au_temp = Au_surface; Au_temp(~valid_mask) = 0;
+                
+                Au_filt = imgaussfilt(Au_temp, 6, 'Padding', 'replicate');
+                W_filt = imgaussfilt(double(valid_mask), 6, 'Padding', 'replicate');
+                W_filt(W_filt == 0) = eps;
+                
+                Au_surface(valid_mask) = Au_filt(valid_mask) ./ W_filt(valid_mask);
+                Au_deep = GeoUtils.mat2gray_roi(Au_surface, ctx.inROI);
+                Au_deep(~ctx.inROI) = NaN;
+            end
+            % ==============================================================
 
             % 3. Top 20
             temp = Au_deep; 
@@ -152,12 +163,9 @@ classdef PostProcessor
                 kmz_threshold = ctx.kmz_threshold;
             end
 
-            % ==============================================================
-            % 【修复点 3】: 保存时，不要将外部置为 0，保留 NaN 空白状态
-            % 这样绘图引擎画等值线时就会在边界自然中止，而不会产生陡降的密集线条。
-            % ==============================================================
+            % 保存结果
             dataFile = fullfile(outDir, sprintf('%s_Result.mat', ctx.mineral_type));
-            % Au_deep(isnan(Au_deep)) = 0; <-- 删除了这句！保留 NaN
+            
             F_abs(isnan(F_abs)) = 0; 
             depth_map(isnan(depth_map)) = 0;
             f_res_MHz(isnan(f_res_MHz)) = 0; 
